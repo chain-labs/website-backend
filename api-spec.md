@@ -423,6 +423,96 @@ All errors return JSON:
 
 ---
 
+## 4. Conversational AI
+
+### 4.1. Chat with Assistant
+
+`POST /api/chat`
+
+* **Description**
+  Continue the contextual conversation once the personalized micro-site is live. Returns the assistant's reply, the full chat history, and optionally: next missions, progress updates, reading suggestions, and a `navigate` object to direct the frontend to a specific page/section.
+
+* **Request**
+
+  * Headers:
+
+    ```
+    Authorization: Bearer <accessToken>
+    Content-Type: application/json
+    ```
+  * Body:
+
+    ```json
+    {
+      "message": "Which mission should I tackle next?",
+      "context": {
+        "page": "mission-dashboard",
+        "section": "mission-1", 
+        "metadata": { "missionId": "defineMetrics" }
+      }
+    }
+    ```
+
+    | Field         | Type     | Required | Description                                                                                    |
+    | ------------- | -------- | :------: | ---------------------------------------------------------------------------------------------- |
+    | `message`     | `string` |    Yes   | The user's latest chat input.                                                                  |
+    | `context`     | `object` |    Yes   | Where the user is on the site, to ground the assistant's reply.                                |
+    | ├─ `page`     | `string` |    Yes   | Page identifier, e.g. `"micro-landing"`, `"case-study"`, `"mission-dashboard"`.                |
+    | ├─ `section`  | `string` |    Yes   | Subsection/component, e.g. `"hero"`, `"mission-3"`, `"progress-widget"`.                       |
+    | └─ `metadata` | `object` |    No    | Any extra state needed, e.g. `{ "caseStudyId": "cs2" }` or `{ "missionId": "defineMetrics" }`. |
+
+* **Response 200**
+
+  ```json
+  {
+    "reply": "Great—you've completed defining your metrics. Next, sketch the agent's decision flow.",
+    "history": [
+      { "role":"user",      "message":"Done with metrics.", "timestamp":"2025-08-05T10:00:10Z" },
+      { "role":"assistant", "message":"Next, sketch the decision flow for your agent...", "timestamp":"2025-08-05T10:00:12Z" }
+    ],
+    "updatedProgress": {
+      "pointsTotal": 15,
+      "missions": [
+        { "id":"defineMetrics","status":"completed","points":15 },
+        { "id":"sketchFlow","status":"pending","points":15 }
+      ],
+      "callUnlocked": false
+    },
+    "followUpMissions": [
+      { "id":"sketchFlow","title":"Sketch Agent Flow","points":15 }
+    ],
+    "suggestedRead": [
+      { "id":"cs2","title":"Menu Recommender","summary":"How we boosted upsell by 22%" }
+    ],
+    "navigate": {
+      "page": "mission-dashboard",
+      "section": "mission-2",
+      "metadata": { "missionId": "sketchFlow" }
+    }
+  }
+  ```
+
+    | Field               | Type            | Description                                                                      |
+    | ------------------- | --------------- | -------------------------------------------------------------------------------- |
+    | `reply`             | `string`        | The assistant's response text.                                                   |
+    | `history`           | `array<object>` | Full chat history so far, each with `{ role, message, timestamp }`.              |
+    | `followUpMissions?` | `array<object>` | (Optional) New or reprioritized missions, same schema as `/api/goal`.            |
+    | `updatedProgress?`  | `object`        | (Optional) `{ pointsTotal, missions, callUnlocked }` snapshot for UI sync.       |
+    | `suggestedRead?`    | `array<object>` | (Optional) Case-study recs: `[ { id, title, summary } ]`.                        |
+    | `navigate?`         | `object`        | (Optional) Navigation instruction to the frontend.                               |
+    | ├─ `page`           | `string`        | Target page to navigate to (same identifiers as in request).                     |
+    | ├─ `section`        | `string`        | Specific section or component on that page.                                      |
+    | └─ `metadata?`      | `object`        | Any parameters needed for that navigation, e.g. `{ "missionId": "sketchFlow" }`. |
+
+* **Errors**
+
+  * `400 Bad Request` – Missing or malformed `message`/`context` fields.
+  * `401 Unauthorized` – Missing, invalid, or expired access token.
+  * `404 Not Found` – Session not found.
+  * `500 Internal Server Error` – AI Assistant or backend failure.
+
+---
+
 ### Summary Table
 
 | Method | Path                    | Description                                         |
@@ -437,6 +527,7 @@ All errors return JSON:
 | POST   | `/api/mission/complete` | Complete mission + award points + next mission      |
 | GET    | `/api/unlock-status`    | Check if call gate unlocked                         |
 | GET    | `/api/session`          | Hydrate full session state                          |
+| POST   | `/api/chat`             | Chat with AI assistant (contextual conversation)    |
 
 ---
 

@@ -51,7 +51,7 @@ def create_app() -> FastAPI:
 
 
 # Import route modules
-from .routes import auth, goals, missions, session
+from .routes import auth, goals, missions, session, chat
 
 # Create the app instance
 app = create_app()
@@ -61,3 +61,4 @@ app.include_router(auth.router)
 app.include_router(goals.router)
 app.include_router(missions.router)
 app.include_router(session.router)
+app.include_router(chat.router)

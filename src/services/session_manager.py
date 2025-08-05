@@ -6,6 +6,7 @@ import uuid
 
 from ..models.goal import Goal, Mission, CaseStudy
 from ..models.mission import MissionStatus
+from ..models.chat import ChatMessage
 
 
 class SessionData:
@@ -20,6 +21,7 @@ class SessionData:
         self.points_total: int = 0
         self.completed_missions: Set[str] = set()
         self.created_at = datetime.utcnow()
+        self.chat_history: List[ChatMessage] = []
     
     def get_mission_statuses(self) -> List[MissionStatus]:
         """Get missions with their current status."""
@@ -48,6 +50,19 @@ class SessionData:
     def is_call_unlocked(self) -> bool:
         """Check if call is unlocked (simple rule: 2+ completed missions)."""
         return len(self.completed_missions) >= 2
+    
+    def add_chat_message(self, role: str, message: str) -> None:
+        """Add a message to the chat history."""
+        chat_message = ChatMessage(
+            role=role,
+            message=message,
+            timestamp=datetime.utcnow()
+        )
+        self.chat_history.append(chat_message)
+    
+    def get_chat_history(self) -> List[ChatMessage]:
+        """Get the full chat history."""
+        return self.chat_history.copy()
 
 
 class SessionManager:
