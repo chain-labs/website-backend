@@ -13,6 +13,8 @@ from ..auth.middleware import get_current_session
 from ..services.session_manager import session_manager
 from ..services.mock_data import mock_data_service
 from ..utils.errors import raise_http_error
+from ..prompt.goal_prompt import generate_goal_prompt
+from ..services.goal_parser import parse_user_goal
 
 router = APIRouter(prefix="/api", tags=["Goals & Personalization"])
 
@@ -132,25 +134,12 @@ async def submit_goal(
         raise_http_error(404, "Session not found")
     
     try:
-        # Generate goal and personalized content
-        goal = mock_data_service.generate_goal_from_input(request.input)
-        missions = mock_data_service.get_random_missions(4)
-        case_studies = mock_data_service.get_random_case_studies(3)
-        headline = mock_data_service.get_random_headline()
+        goal_prompt = generate_goal_prompt(request.input)
+        goal = parse_user_goal(goal_prompt)
+        structured_goal = GoalResponse(session_id=session_id, **goal.dict(exclude={"session_id"}))
+
+        return structured_goal
         
-        # Update session data
-        session_data.goal = goal
-        session_data.missions = missions
-        session_data.recommended_case_studies = case_studies
-        session_data.headline = headline
-        
-        return GoalResponse(
-            session_id=session_id,
-            goal=goal,
-            missions=missions,
-            headline=headline,
-            recommended_case_studies=case_studies
-        )
     except Exception as e:
         raise_http_error(500, "LLM parse error")
 
