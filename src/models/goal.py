@@ -1,8 +1,8 @@
 """Goal and personalization related Pydantic models."""
 
-from typing import Any, Dict, List
+from typing import List
 from pydantic import BaseModel
-
+from datetime import datetime
 
 class Mission(BaseModel):
     """Mission model."""
@@ -33,13 +33,20 @@ class GoalRequest(BaseModel):
     input: str
 
 
+class AssistantMessage(BaseModel): 
+    message: str
+    datetime: datetime
+
+class History(BaseModel):
+    role: str
+    message: str
+    datetime: datetime
+
+
 class GoalResponse(BaseModel):
     """Response for goal submission."""
-    session_id: str
-    goal: Goal
-    missions: List[Mission]
-    headline: str
-    recommended_case_studies: List[CaseStudy]
+    assistantMessage: AssistantMessage
+    history: List[History]
 
 
 class ClarifyRequest(BaseModel):
