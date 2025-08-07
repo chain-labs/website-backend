@@ -1,5 +1,6 @@
 """Goal and personalization routes."""
 
+import traceback
 from fastapi import APIRouter, Depends
 
 from ..models.goal import (
@@ -125,6 +126,8 @@ async def submit_goal(
     - Use `/api/clarify` if you need to refine the goal
     - The generated missions are tailored to your specific input
     """
+
+    # Validate input
     if not request.input or not request.input.strip():
         raise_http_error(400, "Input cannot be empty")
     
@@ -134,14 +137,19 @@ async def submit_goal(
         raise_http_error(404, "Session not found")
     
     try:
-        goal_prompt = generate_goal_prompt(request.input)
-        goal = parse_user_goal(goal_prompt)
-        structured_goal = GoalResponse(session_id=session_id, **goal.dict(exclude={"session_id"}))
-
-        return structured_goal
+        # Construct prompt  
+        goal_prompt = await generate_goal_prompt(request.input)
         
+        # Run async LLM parse
+        goal = await parse_user_goal(goal_prompt.to_messages())
+        
+        # Merge session_id into final response
+        structured_goal = GoalResponse(session_id=session_id, **goal.dict(exclude={"session_id"}))
+        return structured_goal
+
     except Exception as e:
-        raise_http_error(500, "LLM parse error")
+        print("LLM Exception:", traceback.format_exc())
+        raise_http_error(500, f"LLM parse error: {str(e)}")
 
 
 @router.post("/clarify", response_model=ClarifyResponse)
