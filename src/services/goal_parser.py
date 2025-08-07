@@ -18,9 +18,11 @@ from litellm import litellm
 from langchain.schema import BaseMessage
 from ..utils.errors import raise_http_error
 
-# llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.7)
-
-llm = ChatOllama(model="llama3", temperature=0.7)
+# Use ChatOpenAI on Railway, otherwise use Ollama
+if "RAILWAY_DEPLOYMENT_ID" in os.environ:
+    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.7)
+else:
+    llm = ChatOllama(model="llama3", temperature=0.7)
 
 async def parse_user_goal(prompt: List[BaseMessage]) -> dict:
     """
