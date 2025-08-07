@@ -40,6 +40,21 @@ class MockDataService:
                 title="Customer Insights",
                 summary="Enhanced customer satisfaction by 40% using sentiment analysis"
             ),
+            CaseStudy(
+                id="cs5",
+                title="Automated Menu Recommender for Quick-Service Restaurants",
+                summary="Built a rule-based + ML hybrid recommender that suggested personalized dishes based on time of day and popular combinations. Deployed across 3 chain locations, increasing upsell efficiency during lunch rush."
+            ),
+            CaseStudy(
+                id="cs6",
+                title="Feedback Classifier for SaaS Support Tickets",
+                summary="Created a system that uses OpenAI embeddings to group similar support tickets and summarize feedback themes across hundreds of SaaS users. Enabled the product team to detect patterns and prioritize features."
+            ),
+            CaseStudy(
+                id="cs7",
+                title="Onboarding Automation for E-commerce Sellers",
+                summary="Designed a no-code automation tool to walk new sellers through SKU uploads, pricing checks, and product listing approvals. Saved countless support hours and increased seller activation rate."
+            ),
         ]
         
         self.sample_headlines = [
@@ -73,6 +88,10 @@ class MockDataService:
     def get_random_missions(self, count: int = 4) -> List[Mission]:
         """Get random missions for personalization."""
         return random.sample(self.sample_missions, min(count, len(self.sample_missions)))
+
+    def get_all_case_studies(self) -> List[CaseStudy]:
+        """Get all case studies."""
+        return self.sample_case_studies
     
     def get_random_case_studies(self, count: int = 3) -> List[CaseStudy]:
         """Get random case studies."""

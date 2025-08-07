@@ -1,5 +1,6 @@
 """Goal and personalization routes."""
 
+import traceback
 from fastapi import APIRouter, Depends
 
 from ..models.goal import (
@@ -13,6 +14,8 @@ from ..auth.middleware import get_current_session
 from ..services.session_manager import session_manager
 from ..services.mock_data import mock_data_service
 from ..utils.errors import raise_http_error
+from ..prompt.goal_prompt import generate_goal_prompt
+from ..services.goal_parser import parse_user_goal
 
 router = APIRouter(prefix="/api", tags=["Goals & Personalization"])
 
@@ -123,6 +126,8 @@ async def submit_goal(
     - Use `/api/clarify` if you need to refine the goal
     - The generated missions are tailored to your specific input
     """
+
+    # Validate input
     if not request.input or not request.input.strip():
         raise_http_error(400, "Input cannot be empty")
     
@@ -132,27 +137,19 @@ async def submit_goal(
         raise_http_error(404, "Session not found")
     
     try:
-        # Generate goal and personalized content
-        goal = mock_data_service.generate_goal_from_input(request.input)
-        missions = mock_data_service.get_random_missions(4)
-        case_studies = mock_data_service.get_random_case_studies(3)
-        headline = mock_data_service.get_random_headline()
+        # Construct prompt  
+        goal_prompt = await generate_goal_prompt(request.input)
         
-        # Update session data
-        session_data.goal = goal
-        session_data.missions = missions
-        session_data.recommended_case_studies = case_studies
-        session_data.headline = headline
+        # Run async LLM parse
+        goal = await parse_user_goal(goal_prompt.to_messages())
         
-        return GoalResponse(
-            session_id=session_id,
-            goal=goal,
-            missions=missions,
-            headline=headline,
-            recommended_case_studies=case_studies
-        )
+        # Merge session_id into final response
+        structured_goal = GoalResponse(session_id=session_id, **goal.dict(exclude={"session_id"}))
+        return structured_goal
+
     except Exception as e:
-        raise_http_error(500, "LLM parse error")
+        print("LLM Exception:", traceback.format_exc())
+        raise_http_error(500, f"LLM parse error: {str(e)}")
 
 
 @router.post("/clarify", response_model=ClarifyResponse)
