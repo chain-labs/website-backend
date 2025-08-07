@@ -15,13 +15,14 @@ os.environ['LITELLM_LOG'] = 'DEBUG'
 from langchain_ollama import ChatOllama
 from langchain_openai import ChatOpenAI
 from litellm import litellm
-from ..models.goal import GoalResponse
 from langchain.schema import BaseMessage
 from ..utils.errors import raise_http_error
 
-# llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.7)
-
-llm = ChatOllama(model="llama3", temperature=0.7)
+# Use ChatOpenAI on Railway, otherwise use Ollama
+if "RAILWAY_DEPLOYMENT_ID" in os.environ:
+    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.7)
+else:
+    llm = ChatOllama(model="llama3", temperature=0.7)
 
 async def parse_user_goal(prompt: List[BaseMessage]) -> dict:
     """
@@ -41,8 +42,7 @@ async def parse_user_goal(prompt: List[BaseMessage]) -> dict:
         logger.debug(f"Prompt content: {[msg.content for msg in prompt]}")
         
         # Make the LLM call
-        structured_llm = llm.with_structured_output(GoalResponse)
-        raw_response = await structured_llm.ainvoke(prompt)
+        raw_response = await llm.ainvoke(prompt)
         logger.info("Received response from LLM")
         
         # Log the raw response for debugging
@@ -50,7 +50,7 @@ async def parse_user_goal(prompt: List[BaseMessage]) -> dict:
         
         # Parse the response
         try:
-            response_content = raw_response
+            response_content = raw_response.content
             logger.debug(f"Response content: {response_content}")
             return response_content
         except json.JSONDecodeError as je:

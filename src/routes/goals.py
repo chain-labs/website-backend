@@ -1,7 +1,9 @@
 """Goal and personalization routes."""
 
+from email import message
 import traceback
 from fastapi import APIRouter, Depends
+from datetime import datetime
 
 from ..models.goal import (
     GoalRequest,
@@ -63,26 +65,15 @@ async def submit_goal(
     **Response Example:**
     ```json
     {
-        "session_id": "abc123-def456",
-        "goal": {
-            "description": "Build an AI solution for restaurant operations: I want to build an AI agent for restaurants",
-            "category": "hospitality",
-            "priority": "high"
+        "assistantMessage": {
+            "message": "I have received your goal. What is your primary objective?",
+            "datetime": "2023-10-27T10:00:00Z"
         },
-        "missions": [
+        "history": [
             {
-                "id": "defineMetrics",
-                "title": "Define Success Metrics",
-                "points": 15,
-                "status": "pending"
-            }
-        ],
-        "headline": "AI Agent for Restaurants: Increase Table Turnover with Contextual Suggestions",
-        "recommended_case_studies": [
-            {
-                "id": "cs1",
-                "title": "Booking Optimizer",
-                "summary": "Reduced booking latency by 80% with AI-powered recommendations"
+                "role": "user",
+                "message": "I want to build an AI agent for restaurants",
+                "datetime": "2023-10-27T09:59:00Z"
             }
         ]
     }
@@ -135,16 +126,18 @@ async def submit_goal(
     session_data = await session_manager.get_session(session_id)
     if not session_data:
         raise_http_error(404, "Session not found")
+
+    user_message = {"role": "user", "message": request.input, "datetime": datetime.now().isoformat()}
     
     try:
         # Construct prompt  
         goal_prompt = await generate_goal_prompt(request.input)
         
         # Run async LLM parse
-        goal = await parse_user_goal(goal_prompt.to_messages())
+        goal_response = await parse_user_goal(goal_prompt.to_messages())
         
         # Merge session_id into final response
-        structured_goal = GoalResponse(session_id=session_id, **goal.dict(exclude={"session_id"}))
+        structured_goal = GoalResponse(assistantMessage={"message": goal_response, "datetime": datetime.now().isoformat()}, history=[user_message, {"role": "assistant", "message": goal_response, "datetime": datetime.now().isoformat()}])
         return structured_goal
 
     except Exception as e:
