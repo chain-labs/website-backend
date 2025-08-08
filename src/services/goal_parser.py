@@ -46,6 +46,7 @@ async def parse_user_goal(user_prompt: str, session_id: str) -> dict:
         
         logger.debug(f"Prompt content: {user_prompt}")
 
+
         base_chain = goalPromptTemplate | llm
         await history.aadd_messages(messages=[SystemMessage(content=template_prompt), HumanMessage(content=user_prompt)])
         
@@ -77,3 +78,26 @@ async def parse_user_goal(user_prompt: str, session_id: str) -> dict:
         )
 
 
+async def parse_user_clarification(user_prompt: str, session_id: str) -> dict:
+    history = await get_history(session_id)
+
+    messages = await history.aget_messages()
+
+    # print(f"Messages: {messages}")
+
+    if len(messages) == 0:
+        raise_http_error(404, "No chat history found for session")
+    if len(messages) > 3:
+        raise_http_error(400, "Session already has a clarification")
+
+    try:
+        messages.append(HumanMessage(content=user_prompt))
+
+        response = await llm.ainvoke(messages)
+
+        await history.aadd_messages([HumanMessage(content=user_prompt), AIMessage(content=response.content)])
+
+        return response.content
+
+    except Exception as e:
+        raise_http_error(500, f"Failed to clarify goal: {str(e)}")

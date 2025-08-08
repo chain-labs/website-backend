@@ -14,10 +14,10 @@ from src.database import DATABASE_URL
 
 
 
-# if "RAILWAY_DEPLOYMENT_ID" in os.environ:
-llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.7, api_key=OPENAI_API_KEY)
-# else:
-    # llm = ChatOllama(model="llama3", temperature=0.7)
+if "RAILWAY_DEPLOYMENT_ID" in os.environ:
+    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.7, api_key=OPENAI_API_KEY)
+else:
+    llm = ChatOllama(model="llama3", temperature=0.7)
 
 async def get_history(session_id: str) -> PostgresChatMessageHistory:
     # Convert SQLAlchemy URL to standard PostgreSQL connection string

@@ -65,12 +65,20 @@ class Process(BaseModel):
     description: str
 
 
+class ClarifyMission(BaseModel):
+    """Mission model for Clarify Response."""
+    id: str
+    title: str
+    description: str
+    points: int
+
+
 class ClarifyResponse(BaseModel):
-    """Response for goal clarification."""
-    hero: Hero
-    process: List[Process]
+    """Response model for goal clarification."""
+    hero: dict
+    process: List[dict]
     goal: str
-    caseStudies: List[CaseStudy]
+    caseStudies: List[dict]
     whyThisCaseStudiesWereSelected: str
-    missions: List[Mission]
+    missions: List[ClarifyMission]  # Use ClarifyMission here
     why: str
