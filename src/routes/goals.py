@@ -5,12 +5,16 @@ import traceback
 from fastapi import APIRouter, Depends
 from datetime import datetime
 
+import psycopg
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from src.database import DATABASE_URL, get_db
+
 from ..models.goal import (
     GoalRequest,
     GoalResponse, 
     ClarifyRequest,
     ClarifyResponse,
-    PersonalizedResponse
 )
 from ..auth.middleware import get_current_session
 from ..services.session_manager import session_manager
@@ -18,6 +22,7 @@ from ..services.mock_data import mock_data_service
 from ..utils.errors import raise_http_error
 from ..prompt.goal_prompt import generate_goal_prompt
 from ..services.goal_parser import parse_user_goal
+from langchain_postgres import PostgresChatMessageHistory
 
 router = APIRouter(prefix="/api", tags=["Goals & Personalization"])
 
@@ -121,20 +126,12 @@ async def submit_goal(
     # Validate input
     if not request.input or not request.input.strip():
         raise_http_error(400, "Input cannot be empty")
-    
-    # Get session data
-    session_data = await session_manager.get_session(session_id)
-    if not session_data:
-        raise_http_error(404, "Session not found")
 
     user_message = {"role": "user", "message": request.input, "datetime": datetime.now().isoformat()}
     
     try:
-        # Construct prompt  
-        goal_prompt = await generate_goal_prompt(request.input)
-        
         # Run async LLM parse
-        goal_response = await parse_user_goal(goal_prompt.to_messages())
+        goal_response = await parse_user_goal(request.input, session_id)
         
         # Merge session_id into final response
         structured_goal = GoalResponse(assistantMessage={"message": goal_response, "datetime": datetime.now().isoformat()}, history=[user_message, {"role": "assistant", "message": goal_response, "datetime": datetime.now().isoformat()}])
@@ -148,7 +145,8 @@ async def submit_goal(
 @router.post("/clarify", response_model=ClarifyResponse)
 async def clarify_goal(
     request: ClarifyRequest,
-    session_id: str = Depends(get_current_session)
+    session_id: str = Depends(get_current_session),
+    db: AsyncSession = Depends(get_db)
 ):
     """
     Refine and clarify an existing goal with additional context.
@@ -194,29 +192,15 @@ async def clarify_goal(
     
     **Response Example:**
     ```json
-    {
-        "goal": {
-            "description": "Build an AI solution for restaurant operations: I want to build an AI agent for restaurants - Clarified: Focus on customer satisfaction and reducing wait times",
-            "category": "hospitality",
-            "priority": "high"
-        },
-        "missions": [
-            {
-                "id": "identifyKPIs",
-                "title": "Identify Key Performance Indicators",
-                "points": 10,
-                "status": "pending"
-            }
-        ],
-        "headline": "Customer Experience AI: Personalize Dining with Advanced Analytics",
-        "recommended_case_studies": [
-            {
-                "id": "cs4",
-                "title": "Customer Insights",
-                "summary": "Enhanced customer satisfaction by 40% using sentiment analysis"
-            }
-        ]
-    }
+        {
+            hero={"title": "AI Agent for Restaurants: Increase Table Turnover with Contextual Suggestions", "description": "Build an AI solution for restaurant operations: I want to build an AI agent for restaurants"},
+            process=[{"name": "Define Success Metrics", "description": "Define success metrics for your AI agent for restaurants"}, {"name": "Sketch User Flow", "description": "Sketch user flow for your AI agent for restaurants"}],
+            goal=session_data.goal,
+            caseStudies=[{"id": "cs1", "title": "Booking Optimizer", "summary": "Reduced booking latency by 80% with AI-powered recommendations"}, {"id": "cs2", "title": "Menu Intelligence", "summary": "Increased revenue 30% through personalized menu suggestions"}],
+            whyThisCaseStudiesWereSelected="",
+            missions=[{"id": "defineMetrics", "title": "Define Success Metrics", "points": 15}, {"id": "sketchFlow", "title": "Sketch User Flow", "points": 15}],
+            why=""
+        }
     ```
     
     **Usage Example:**
@@ -260,11 +244,26 @@ async def clarify_goal(
     """
     if not request.clarification or not request.clarification.strip():
         raise_http_error(400, "Clarification cannot be empty")
+
     
-    # Get session data
-    session_data = await session_manager.get_session(session_id)
-    if not session_data or not session_data.goal:
-        raise_http_error(404, "Session or goal not found")
+
+    # find if session has a chat history
+    
+
+    chat_history = PostgresChatMessageHistory(
+        "message_store",
+        session_id,
+        sync_connection=psycopg.connect(DATABASE_URL.replace("postgresql+asyncpg://", "postgresql://")),
+    )
+
+    try:
+        messages = chat_history.get_messages()
+        print(messages)
+    except Exception as e:
+        raise_http_error(500, f"Failed to retrieve chat history: {str(e)}")
+
+    
+
     
     try:
         # Update goal based on clarification (mock implementation)
@@ -283,16 +282,19 @@ async def clarify_goal(
         session_data.headline = headline
         
         return ClarifyResponse(
-            goal=updated_goal,
-            missions=missions,
-            headline=headline,
-            recommended_case_studies=case_studies
+            hero={"title": "AI Agent for Restaurants: Increase Table Turnover with Contextual Suggestions", "description": "Build an AI solution for restaurant operations: I want to build an AI agent for restaurants"},
+            process=[{"name": "Define Success Metrics", "description": "Define success metrics for your AI agent for restaurants"}, {"name": "Sketch User Flow", "description": "Sketch user flow for your AI agent for restaurants"}],
+            goal=session_data.goal,
+            caseStudies=[{"id": "cs1", "title": "Booking Optimizer", "summary": "Reduced booking latency by 80% with AI-powered recommendations"}, {"id": "cs2", "title": "Menu Intelligence", "summary": "Increased revenue 30% through personalized menu suggestions"}],
+            whyThisCaseStudiesWereSelected="",
+            missions=[{"id": "defineMetrics", "title": "Define Success Metrics", "points": 15}, {"id": "sketchFlow", "title": "Sketch User Flow", "points": 15}],
+            why=""
         )
     except Exception as e:
         raise_http_error(500, "Clarification parse failure")
 
 
-@router.get("/personalised", response_model=PersonalizedResponse)
+@router.get("/personalised", response_model=ClarifyResponse)
 async def get_personalized_content(session_id: str = Depends(get_current_session)):
     """
     Retrieve all personalized content for the current session.
@@ -423,11 +425,14 @@ async def get_personalized_content(session_id: str = Depends(get_current_session
         raise_http_error(404, "No personalized content found. Please submit a goal first.")
     
     try:
-        return PersonalizedResponse(
-            headline=session_data.headline,
+        return ClarifyResponse(
+            hero={"title": "AI Agent for Restaurants: Increase Table Turnover with Contextual Suggestions", "description": "Build an AI solution for restaurant operations: I want to build an AI agent for restaurants"},
+            process=[{"name": "Define Success Metrics", "description": "Define success metrics for your AI agent for restaurants"}, {"name": "Sketch User Flow", "description": "Sketch user flow for your AI agent for restaurants"}],
             goal=session_data.goal,
-            missions=session_data.missions,
-            recommended_case_studies=session_data.recommended_case_studies
+            caseStudies=[{"id": "cs1", "title": "Booking Optimizer", "summary": "Reduced booking latency by 80% with AI-powered recommendations"}, {"id": "cs2", "title": "Menu Intelligence", "summary": "Increased revenue 30% through personalized menu suggestions"}],
+            whyThisCaseStudiesWereSelected="",
+            missions=[{"id": "defineMetrics", "title": "Define Success Metrics", "points": 15}, {"id": "sketchFlow", "title": "Sketch User Flow", "points": 15}],
+            why=""
         )
     except Exception as e:
         raise_http_error(500, "Personalization engine error")

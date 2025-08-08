@@ -4,15 +4,13 @@ from sqlalchemy.orm import declarative_base, sessionmaker
 from sqlalchemy.pool import NullPool
 
 
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql+asyncpg://postgres:postgres@localhost:5432/chainlabs")
+DATABASE_URL = os.getenv("DATABASE_URL", "postgresql+asyncpg://admin:admin123@localhost:5432/chainlabs")
 
 engine = create_async_engine(
     DATABASE_URL, 
     echo=True,
     future=True,
     pool_pre_ping=True,
-    pool_size=20,
-    max_overflow=10,
     poolclass=NullPool
 )
 

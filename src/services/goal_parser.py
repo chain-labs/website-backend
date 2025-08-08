@@ -12,19 +12,17 @@ os.environ["LITELLM_DISABLE_VECTOR_STORE"] = "true"
 os.environ['LITELLM_LOG'] = 'DEBUG'
 
 # from langchain_litellm import ChatLiteLLM
+from langchain.prompts import ChatPromptTemplate
 from langchain_ollama import ChatOllama
 from langchain_openai import ChatOpenAI
+from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
 from litellm import litellm
 from langchain.schema import BaseMessage
 from ..utils.errors import raise_http_error
+from src.services.llm_services import get_history, llm
+from ..prompt.goal_prompt import goalPromptTemplate, template_prompt
 
-# Use ChatOpenAI on Railway, otherwise use Ollama
-if "RAILWAY_DEPLOYMENT_ID" in os.environ:
-    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.7)
-else:
-    llm = ChatOllama(model="llama3", temperature=0.7)
-
-async def parse_user_goal(prompt: List[BaseMessage]) -> dict:
+async def parse_user_goal(user_prompt: str, session_id: str) -> dict:
     """
     Parse user goal using LLM and return structured response.
     
@@ -38,11 +36,22 @@ async def parse_user_goal(prompt: List[BaseMessage]) -> dict:
         HTTPException: If there's an error processing the request
     """
     try:
+        history = await get_history(session_id)
+        messages = await history.aget_messages()
+
+        if (len(messages) != 0):
+            raise_http_error(400, "Session already has a goal")
+
         logger.info("Starting LLM invocation...")
-        logger.debug(f"Prompt content: {[msg.content for msg in prompt]}")
+        
+        logger.debug(f"Prompt content: {user_prompt}")
+
+        base_chain = goalPromptTemplate | llm
+        await history.aadd_messages(messages=[SystemMessage(content=template_prompt), HumanMessage(content=user_prompt)])
+        
         
         # Make the LLM call
-        raw_response = await llm.ainvoke(prompt)
+        raw_response = await base_chain.ainvoke({"user_goal_input": user_prompt})
         logger.info("Received response from LLM")
         
         # Log the raw response for debugging
@@ -51,7 +60,10 @@ async def parse_user_goal(prompt: List[BaseMessage]) -> dict:
         # Parse the response
         try:
             response_content = raw_response.content
+            await history.aadd_messages(messages=[AIMessage(content=response_content)])
             logger.debug(f"Response content: {response_content}")
+            messages = await history.aget_messages()
+            print(messages)
             return response_content
         except json.JSONDecodeError as je:
             logger.error(f"Failed to parse JSON response: {je}")

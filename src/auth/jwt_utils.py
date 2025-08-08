@@ -11,19 +11,18 @@ import uuid
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import Request, Depends, HTTPException, status
+from fastapi.security import OAuth2PasswordBearer
 
+from src.database import get_db
 from src.models.db.db_models import DBSession
 
 from ..models.auth import TokenPayload
 from ..utils.errors import raise_http_error
 from scripts.generate_secret import generate_jwt_secret
+from src.config import JWT_SECRET_KEY, JWT_ALGORITHM, TOKEN_EXPIRY_SECONDS
 
-
-# Secret key for JWT signing from environment variable
-JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", generate_jwt_secret())
-JWT_ALGORITHM = "HS256"
-TOKEN_EXPIRY_SECONDS = 31536000  # 1 year as specified
-
+# OAuth2 scheme for token authentication
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
 class JWTManager:
     """JWT token management."""
@@ -35,20 +34,47 @@ class JWTManager:
     
     async def generate_session_id(self, db: AsyncSession, request: Request = None) -> str:
         """Generate a unique session ID and store it in the database."""
-        session_id = str(uuid.uuid4())
+        try:
+            session_id = str(uuid.uuid4())
+            print(f"Creating session with ID: {session_id}")
 
-        # Create new session in database
-        db_session = DBSession(
-            id=session_id,
-            user_agent=request.headers.get("user-agent") if request else None,
-            ip_address=request.client.host if request and hasattr(request, "client") and request.client else None
-        )
+            # Create new session in database
+            db_session = DBSession(
+                id=session_id,
+                user_agent=request.headers.get("user-agent") if request else None,
+                ip_address=request.client.host if request and hasattr(request, "client") and request.client else None,
+                created_at=datetime.now(timezone.utc),
+                last_activity=datetime.now(timezone.utc),
+                is_active=True
+            )
 
-        db.add(db_session)
-        await db.commit()
-        await db.refresh(db_session)
-        
-        return session_id
+            print(f"DB Session object created: {db_session}")
+            db.add(db_session)
+            print("Attempting to commit session to database...")
+            
+            try:
+                await db.commit()
+                print("Successfully committed session to database")
+                await db.refresh(db_session)
+                print(f"Refreshed session: {db_session}")
+                return session_id
+            except Exception as commit_error:
+                await db.rollback()
+                print(f"Error committing session to database: {str(commit_error)}")
+                print(f"Error type: {type(commit_error).__name__}")
+                if hasattr(commit_error, 'orig'):
+                    print(f"Original error: {commit_error.orig}")
+                raise
+                
+        except Exception as e:
+            print(f"Unexpected error in generate_session_id: {str(e)}")
+            print(f"Error type: {type(e).__name__}")
+            if hasattr(e, 'orig'):
+                print(f"Original error: {e.orig}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to create session: {str(e)}"
+            )
     
     async def create_access_token(self, session_id: str) -> str:
         """Create an access token with session ID."""
@@ -147,4 +173,3 @@ async def get_current_session(
             )
         raise 
             
-    
