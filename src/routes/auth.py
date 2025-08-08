@@ -1,7 +1,8 @@
 """Authentication routes."""
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi.responses import JSONResponse
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models.auth import (
     SessionResponse, 
@@ -14,12 +15,13 @@ from ..auth.jwt_utils import jwt_manager
 from ..auth.middleware import get_current_session
 from ..services.session_manager import session_manager
 from ..utils.errors import raise_http_error, create_error_response
+from ..database import get_db
 
 router = APIRouter(prefix="/api/auth", tags=["Authentication"])
 
 
 @router.post("/session", response_model=SessionResponse)
-async def create_session():
+async def create_session(request: Request, db: AsyncSession = Depends(get_db)):
     """
     Create a new anonymous session with JWT tokens.
     
@@ -70,9 +72,12 @@ async def create_session():
     """
     try:
         # Generate session ID and tokens
-        session_id = jwt_manager.generate_session_id()
-        access_token = jwt_manager.create_access_token(session_id)
-        refresh_token = jwt_manager.create_refresh_token(session_id)
+        session_id = await jwt_manager.generate_session_id(db, request)
+        print(f"Session ID: {session_id}")
+        access_token = await jwt_manager.create_access_token(session_id)
+        print(f"Access Token: {access_token}")
+        refresh_token = await jwt_manager.create_refresh_token(session_id)
+        print(f"Refresh Token: {refresh_token}")
         
         # Create session in memory
         await session_manager.create_session(session_id)
@@ -88,7 +93,7 @@ async def create_session():
 
 
 @router.post("/refresh", response_model=RefreshResponse)
-async def refresh_token(request: RefreshRequest):
+async def refresh_token(request: RefreshRequest, db: AsyncSession = Depends(get_db)):
     """
     Exchange a valid refresh token for new access and refresh tokens.
     
@@ -165,6 +170,8 @@ async def refresh_token(request: RefreshRequest):
         # Generate new tokens
         new_access_token = jwt_manager.create_access_token(session_id)
         new_refresh_token = jwt_manager.create_refresh_token(session_id)
+
+        await jwt_manager.update_session_activity(session_id, db)
         
         # Optionally revoke old refresh token
         await session_manager.revoke_token(request.refresh_token)
@@ -184,7 +191,7 @@ async def refresh_token(request: RefreshRequest):
 @router.delete("/session", response_model=RevokeResponse)
 async def revoke_session(
     request: RevokeRequest,
-    session_id: str = Depends(get_current_session)
+    db: AsyncSession = Depends(get_db)
 ):
     """
     Revoke (blacklist) a refresh token, ending the session.
@@ -261,6 +268,17 @@ async def revoke_session(
     try:
         # Add token to revoked list
         await session_manager.revoke_token(request.refresh_token)
+
+        payload = jwt_manager.decode_token(request.refresh_token)
+        session_id = payload.session_id
+        
+        # Get the session
+        session = await jwt_manager.get_session(session_id, db)
+        if session:
+            # Mark session as inactive
+            session.is_active = False
+            db.add(session)
+            await db.commit()
         
         return RevokeResponse(revoked=True)
     except Exception as e:

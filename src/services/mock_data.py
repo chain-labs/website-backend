@@ -11,12 +11,12 @@ class MockDataService:
     
     def __init__(self):
         self.sample_missions = [
-            Mission(id="defineMetrics", title="Define Success Metrics", points=15),
-            Mission(id="sketchFlow", title="Sketch User Flow", points=15),
-            Mission(id="runDemo", title="Run the AI demo", points=20),
-            Mission(id="identifyKPIs", title="Identify Key Performance Indicators", points=10),
-            Mission(id="buildPrototype", title="Build Initial Prototype", points=25),
-            Mission(id="testUsability", title="Test User Experience", points=15),
+            Mission(id="defineMetrics", title="Define Success Metrics", category="planning", points=15),
+            Mission(id="sketchFlow", title="Sketch User Flow", category="design", points=15),
+            Mission(id="runDemo", title="Run the AI demo", category="development", points=20),
+            Mission(id="identifyKPIs", title="Identify Key Performance Indicators", category="planning", points=10),
+            Mission(id="buildPrototype", title="Build Initial Prototype", category="development", points=25),
+            Mission(id="testUsability", title="Test User Experience", category="testing", points=15),
         ]
         
         self.sample_case_studies = [

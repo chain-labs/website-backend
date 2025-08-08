@@ -8,6 +8,9 @@ from ..models.goal import Goal, Mission, CaseStudy
 from ..models.mission import MissionStatus
 from ..models.chat import ChatMessage
 
+from dotenv import load_dotenv
+load_dotenv()
+
 
 class SessionData:
     """Session data structure."""
