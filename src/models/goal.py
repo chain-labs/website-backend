@@ -1,5 +1,6 @@
 """Goal and personalization related Pydantic models."""
 
+from token import EQUAL
 from typing import List
 from pydantic import BaseModel
 from datetime import datetime
@@ -8,6 +9,7 @@ class Mission(BaseModel):
     """Mission model."""
     id: str
     title: str
+    category: str
     points: int
     status: str = "pending"  # pending, completed, cancelled
 
@@ -53,18 +55,30 @@ class ClarifyRequest(BaseModel):
     """Request to clarify a goal."""
     clarification: str
 
+class Hero(BaseModel):
+    title: str
+    description: str
+
+
+class Process(BaseModel):
+    name: str
+    description: str
+
+
+class ClarifyMission(BaseModel):
+    """Mission model for Clarify Response."""
+    id: str
+    title: str
+    description: str
+    points: int
+
 
 class ClarifyResponse(BaseModel):
-    """Response for goal clarification."""
-    goal: Goal
-    missions: List[Mission]
-    headline: str
-    recommended_case_studies: List[CaseStudy]
-
-
-class PersonalizedResponse(BaseModel):
-    """Response for personalized content."""
-    headline: str
-    goal: Goal
-    missions: List[Mission]
-    recommended_case_studies: List[CaseStudy]
+    """Response model for goal clarification."""
+    hero: dict
+    process: List[dict]
+    goal: str
+    caseStudies: List[dict]
+    whyThisCaseStudiesWereSelected: str
+    missions: List[ClarifyMission]  # Use ClarifyMission here
+    why: str

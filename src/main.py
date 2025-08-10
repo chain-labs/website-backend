@@ -1,6 +1,7 @@
 """Main FastAPI application."""
 
-from fastapi import FastAPI
+import time
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -26,6 +27,16 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    @app.middleware("http")
+    async def add_process_time_header(request:Request, call_next):
+        """Middleware to add process time header."""
+
+        start_time = time.time()
+        response = await call_next(request)
+        process_time = time.time() - start_time
+        response.headers["X-Process-Time"] = str(process_time)
+        return response
     
     # Custom exception handler for consistent error format
     @app.exception_handler(Exception)
