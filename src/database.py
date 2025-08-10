@@ -23,6 +23,8 @@ async_session_factory = async_sessionmaker(
 
 Base = declarative_base()
 
+from src.models.db.db_models import *
+
 async def get_db() -> AsyncSession:
     """Dependency that provides a database session"""
 
@@ -35,6 +37,8 @@ async def get_db() -> AsyncSession:
             raise
         finally:
             await session.close()
+
+    
     
 
 
