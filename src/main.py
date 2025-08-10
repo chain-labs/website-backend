@@ -1,5 +1,6 @@
 """Main FastAPI application."""
 
+from contextlib import asynccontextmanager
 import time
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -10,13 +11,21 @@ from .utils.errors import ErrorResponse
 
 def create_app() -> FastAPI:
     """Create and configure the FastAPI application."""
-    
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        from .database import engine, Base
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        yield
+
     app = FastAPI(
         title="Chain Labs Backend API",
         description="Dummy server for frontend integration",
         version="1.0.0",
         docs_url="/docs",
-        redoc_url="/redoc"
+        redoc_url="/redoc",
+        lifespan=lifespan
     )
     
     # Add CORS middleware
@@ -59,6 +68,7 @@ def create_app() -> FastAPI:
         return {"status": "healthy", "message": "Dummy server is running"}
     
     return app
+
 
 
 # Import route modules

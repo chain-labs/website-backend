@@ -249,7 +249,7 @@ async def clarify_goal(
 
         clarification_response = await parse_user_clarification(request.clarification, session_id)
         # print(f"Clarification Response: {clarification_response}")
-        match = re.search(r'```json\n(.*?)\n```', clarification_response, re.DOTALL)
+        match = re.search(r'```json\n(.*?)\n```', clarification_response, re.DOTALL) # Template Literal
         if match:
             json_string = match.group(1)
         # Step 2: Parse the JSON
@@ -405,12 +405,15 @@ async def get_personalized_content(session_id: str = Depends(get_current_session
     5. Check progress via `/api/progress`
     """
     # Get session data
-    session_data = await session_manager.get_session(session_id)
+    # session_data = await session_manager.get_session(session_id)
     if not session_data:
         raise_http_error(404, "Session not found")
     
     if not session_data.goal:
         raise_http_error(404, "No personalized content found. Please submit a goal first.")
+
+    
+    # Optimized workflow
     
     try:
         return ClarifyResponse(
