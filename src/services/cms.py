@@ -12,7 +12,7 @@ from __future__ import annotations
 import asyncio
 import copy
 from typing import Any, Dict, Iterable, List, Optional
-from dummyCms import _CASE_STUDIES
+from .dummyCms import _CASE_STUDIES
 
 __all__ = [
     "connect",

@@ -2,6 +2,7 @@
 
 from token import EQUAL
 from typing import List
+from langchain_core.messages import BaseMessage
 from pydantic import BaseModel
 from datetime import datetime
 
@@ -18,7 +19,9 @@ class CaseStudy(BaseModel):
     """Case study model."""
     id: str
     title: str
-    summary: str
+    description: str
+    shortDescription: str
+    thumbnail: str
 
 
 class Goal(BaseModel):
@@ -75,10 +78,30 @@ class ClarifyMission(BaseModel):
 
 class ClarifyResponse(BaseModel):
     """Response model for goal clarification."""
-    hero: dict
-    process: List[dict]
+    hero: Hero
+    process: List[Process]
     goal: str
-    caseStudies: List[dict]
+    caseStudies: List[CaseStudy]
     whyThisCaseStudiesWereSelected: str
     missions: List[ClarifyMission]  # Use ClarifyMission here
     why: str
+    fallbackToGenericData: bool
+
+class PersonalisedData(BaseModel):
+    """Response model for personalised data"""
+    hero: Hero
+    process: List[Process]
+    goal: str
+    caseStudies: List[CaseStudy]
+    whyThisCaseStudiesWereSelected: str
+    missions: List[ClarifyMission]  # Use ClarifyMission here
+    why: str
+    fallbackToGenericData: bool
+
+class PersonalisedResponse(BaseModel):
+    """Response model for personalised data"""
+    status: str
+    messages: List[BaseMessage]
+    personalisation: PersonalisedData
+
+

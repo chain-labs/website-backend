@@ -19,44 +19,6 @@ class MockDataService:
             Mission(id="testUsability", title="Test User Experience", category="testing", points=15),
         ]
         
-        self.sample_case_studies = [
-            CaseStudy(
-                id="cs1",
-                title="Booking Optimizer",
-                summary="Reduced booking latency by 80% with AI-powered recommendations"
-            ),
-            CaseStudy(
-                id="cs2",
-                title="Menu Intelligence",
-                summary="Increased revenue 30% through personalized menu suggestions"
-            ),
-            CaseStudy(
-                id="cs3",
-                title="Staff Scheduler",
-                summary="Optimized staff scheduling reducing costs by 25%"
-            ),
-            CaseStudy(
-                id="cs4",
-                title="Customer Insights",
-                summary="Enhanced customer satisfaction by 40% using sentiment analysis"
-            ),
-            CaseStudy(
-                id="cs5",
-                title="Automated Menu Recommender for Quick-Service Restaurants",
-                summary="Built a rule-based + ML hybrid recommender that suggested personalized dishes based on time of day and popular combinations. Deployed across 3 chain locations, increasing upsell efficiency during lunch rush."
-            ),
-            CaseStudy(
-                id="cs6",
-                title="Feedback Classifier for SaaS Support Tickets",
-                summary="Created a system that uses OpenAI embeddings to group similar support tickets and summarize feedback themes across hundreds of SaaS users. Enabled the product team to detect patterns and prioritize features."
-            ),
-            CaseStudy(
-                id="cs7",
-                title="Onboarding Automation for E-commerce Sellers",
-                summary="Designed a no-code automation tool to walk new sellers through SKU uploads, pricing checks, and product listing approvals. Saved countless support hours and increased seller activation rate."
-            ),
-        ]
-        
         self.sample_headlines = [
             "AI Agent for Restaurants: Increase Table Turnover with Contextual Suggestions",
             "Smart Restaurant Assistant: Boost Efficiency with Intelligent Automation", 
