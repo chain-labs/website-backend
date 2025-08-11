@@ -21,7 +21,7 @@ else:
 
 async def get_history(session_id: str) -> PostgresChatMessageHistory:
     # Convert SQLAlchemy URL to standard PostgreSQL connection string
-    db_url = DATABASE_URL.replace('postgresql+asyncpg://', 'postgresql://')
+    db_url = DATABASE_URL.replace('postgresql+psycopg://', 'postgresql://')
     async_connection = await psycopg.AsyncConnection.connect(db_url)
     return PostgresChatMessageHistory("message_store", session_id, async_connection=async_connection)
 
