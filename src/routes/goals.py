@@ -284,59 +284,89 @@ async def clarify_goal(
 @router.get("/personalised", response_model=PersonalisedResponse)
 async def get_personalized_content(session_id: str = Depends(get_current_session)):
     """
-    Retrieve all personalized content for the current session.
-    
+    Get all personalized content for the current session.
+
     **Description:**
-    Fetches all personalized content generated for your session, including 
-    the structured goal, personalized missions, headline, and recommended 
-    case studies. This is a read-only endpoint to retrieve existing 
-    personalization data.
-    
+    Returns the latest personalized content for the authenticated session, including the structured goal, missions, case studies, and related metadata. The endpoint reflects the most recent state, which may be either the initial goal or a clarified version if the user has refined their goal.
+
+    **How it works:**
+    - If the user has only submitted an initial goal, the response will include the initial personalized data.
+    - If the user has clarified their goal (via `/api/clarify`), the response will reflect the clarified content.
+    - The endpoint always returns the current state, including all assistant/user messages for the session.
+
     **When to use:**
-    - To refresh/reload personalized content in your UI
-    - When reconnecting after a session break
-    - To display goal and mission information on different pages
-    - For caching and offline functionality
-    - When you need to show current personalization status
-    
-    **Prerequisites:**
-    - Must have submitted a goal via `/api/goal` first
-    - Session must contain personalized content
-    
-    **Authentication Required:**
-    Requires a valid Bearer token in the Authorization header.
-    
-    **Request Headers:**
-    ```
-    Authorization: Bearer <access_token>
-    ```
-    
-    **No Request Body Required:**
-    This is a GET request - no request body needed.
-    
+    - To reload or refresh the personalized content in the UI
+    - After a session break or reconnect
+    - To display the current goal, missions, and recommendations
+    - For offline/caching scenarios
+
+    **Authentication:**
+    - Requires a valid Bearer token in the `Authorization` header.
+
+    **Request:**
+    - Method: `GET`
+    - URL: `/api/personalised`
+    - No request body required.
+
+    **Response:**
+    - `status`: `"INITIAL"` if only the initial goal is present, `"CLARIFIED"` if the user has clarified their goal.
+    - `messages`: List of all assistant/user messages for the session (may be empty if no messages yet).
+    - `personalisation`: The current personalized data, including:
+        - `hero`: `{ "title": str, "description": str }`
+        - `process`: List of process steps (may be empty)
+        - `goal`: The current goal description (str)
+        - `caseStudies`: List of case study objects (may be empty if none found)
+        - `whyThisCaseStudiesWereSelected`: Explanation for the case study selection (str, may be empty)
+        - `missions`: List of mission objects (may be empty)
+        - `why`: Reasoning for the personalized plan (str, may be empty)
+        - `fallbackToGenericData`: Boolean indicating if generic data was used
+
     **Response Example:**
     ```json
     {
         "status": "CLARIFIED",
-        "messages": [...],
+        "messages": [
+            {
+                "type": "user",
+                "content": "I want to build an AI agent for restaurants",
+                "timestamp": "2024-06-01T12:00:00Z"
+            },
+            {
+                "type": "assistant",
+                "content": "Great! Let's get started...",
+                "timestamp": "2024-06-01T12:00:01Z"
+            }
+            // ... more messages
+        ],
         "personalisation": {
-            "hero": {"title": "...", "description": "..."},
-            "process": [...],
-            "goal": "...",
-            "caseStudies": [...],
-            "whyThisCaseStudiesWereSelected": "...",
-            "missions": [...],
-            "why": "...",
+            "hero": {"title": "AI Agent for Restaurants", "description": "A solution to optimize restaurant operations."},
+            "process": [
+                {"name": "Define Success Metrics", "description": "Identify KPIs for your restaurant AI agent."}
+            ],
+            "goal": "Build an AI agent for restaurants",
+            "caseStudies": [
+                {
+                    "id": "case-1",
+                    "title": "Smart Table Management",
+                    "description": "...",
+                    "shortDescription": "...",
+                    "thumbnail": "..."
+                }
+            ],
+            "whyThisCaseStudiesWereSelected": "These case studies are relevant to your goal.",
+            "missions": [
+                {"id": "defineMetrics", "title": "Define Success Metrics", "category": "planning", "points": 15, "status": "pending"}
+            ],
+            "why": "Personalized plan based on your input.",
             "fallbackToGenericData": false
         }
     }
     ```
-    
-    **Error Cases:**
-    - **401 Unauthorized**: Missing or invalid Authorization header
-    - **404 Not Found**: Session not found
-    - **404 Not Found**: No personalized content found (haven't submitted goal yet)
-    - **500 Internal Server Error**: Personalization retrieval failed
+
+    **Error Responses:**
+    - `401 Unauthorized`: Missing or invalid Authorization header.
+    - `404 Not Found`: Session not found or no personalized content available (e.g., if the user hasn't submitted a goal yet).
+    - `500 Internal Server Error`: Unexpected error during personalization retrieval.
     """
 
     try:
@@ -422,8 +452,19 @@ async def get_personalized_content(session_id: str = Depends(get_current_session
                     fallbackToGenericData=True
                 )
         else:
-            # Not enough messages for personalization
-            raise_http_error(404, "No personalized content found. Please submit a goal first.")
+            # INITIAL status: User has just started, return basic data
+            status = "INITIAL"
+            messages = messages_list if messages_list else []
+            personalised_data = PersonalisedData(
+                hero={"title": "Welcome to Chain Labs", "description": "Let's get started with your AI project"},
+                process=[],
+                goal="No goal submitted yet",
+                caseStudies=[],
+                whyThisCaseStudiesWereSelected="",
+                missions=[],
+                why="",
+                fallbackToGenericData=True
+            )
 
         # Safety check: ensure personalised_data is never None
         if personalised_data is None:
