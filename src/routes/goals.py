@@ -10,18 +10,22 @@ from datetime import datetime
 import psycopg
 
 from src.database import DATABASE_URL
+from src.services.llm_services import get_history
 
 from ..models.goal import (
     GoalRequest,
     GoalResponse, 
     ClarifyRequest,
     ClarifyResponse,
+    PersonalisedData,
+    PersonalisedResponse,
 )
 from ..auth.middleware import get_current_session
 from ..services.session_manager import session_manager
 from ..services.mock_data import mock_data_service
 from ..utils.errors import raise_http_error
 from ..services.goal_parser import parse_user_clarification, parse_user_goal
+from ..services import cms
 
 router = APIRouter(prefix="/api", tags=["Goals & Personalization"])
 
@@ -250,178 +254,228 @@ async def clarify_goal(
         match = re.search(r'```json\n(.*?)\n```', clarification_response, re.DOTALL) # Template Literal
         if match:
             json_string = match.group(1)
-        # Step 2: Parse the JSON
-        try:
-            response_data = json.loads(json_string)
-            print(f"JSON response:{response_data}")
-            response_data.pop("fallbackToGenericData", None)
-            return ClarifyResponse(
-                **response_data
-            )
-        except json.JSONDecodeError as e:
-            print("JSON decoding failed:", e)
-        # Update goal based on clarification (mock implementation)
-        # updated_goal = session_data.goal.model_copy()
-        # updated_goal.description += f" - Clarified: {request.clarification}"
-        
-        # Regenerate personalized content
-        # missions = mock_data_service.get_random_missions(4)
-        # case_studies = mock_data_service.get_random_case_studies(3)
-        # headline = mock_data_service.get_random_headline()
-        
-        # Update session
-        # session_data.goal = updated_goal
-        # session_data.missions = missions
-        # session_data.recommended_case_studies = case_studies
-        # session_data.headline = headline
-        
-        
+            # Step 2: Parse the JSON
+            try:
+                response_data = json.loads(json_string)
+                print(f"JSON response:{response_data}")
+
+                # Populate case studies from CMS by IDs if present
+                case_ids = response_data.get("caseStudies", []) or []
+                if isinstance(case_ids, list) and all(isinstance(cid, str) for cid in case_ids):
+                    case_studies = await cms.get_case_studies_by_ids(case_ids)
+                    response_data["caseStudies"] = case_studies
+                else:
+                    response_data["caseStudies"] = []
+
+                # Ensure required flags/fields exist
+                if "fallbackToGenericData" not in response_data:
+                    response_data["fallbackToGenericData"] = False
+
+                return ClarifyResponse(
+                    **response_data
+                )
+            except json.JSONDecodeError as e:
+                print("JSON decoding failed:", e)
+
     except Exception as e:
         print("LLM Exception:", traceback.format_exc())
         raise_http_error(500, f"LLM parse error: {str(e)}")
 
-@router.get("/personalised", response_model=ClarifyResponse)
+@router.get("/personalised", response_model=PersonalisedResponse)
 async def get_personalized_content(session_id: str = Depends(get_current_session)):
     """
-    Retrieve all personalized content for the current session.
-    
+    Get all personalized content for the current session.
+
     **Description:**
-    Fetches all personalized content generated for your session, including 
-    the structured goal, personalized missions, headline, and recommended 
-    case studies. This is a read-only endpoint to retrieve existing 
-    personalization data.
-    
+    Returns the latest personalized content for the authenticated session, including the structured goal, missions, case studies, and related metadata. The endpoint reflects the most recent state, which may be either the initial goal or a clarified version if the user has refined their goal.
+
+    **How it works:**
+    - If the user has only submitted an initial goal, the response will include the initial personalized data.
+    - If the user has clarified their goal (via `/api/clarify`), the response will reflect the clarified content.
+    - The endpoint always returns the current state, including all assistant/user messages for the session.
+
     **When to use:**
-    - To refresh/reload personalized content in your UI
-    - When reconnecting after a session break
-    - To display goal and mission information on different pages
-    - For caching and offline functionality
-    - When you need to show current personalization status
-    
-    **Prerequisites:**
-    - Must have submitted a goal via `/api/goal` first
-    - Session must contain personalized content
-    
-    **Authentication Required:**
-    Requires a valid Bearer token in the Authorization header.
-    
-    **Request Headers:**
-    ```
-    Authorization: Bearer <access_token>
-    ```
-    
-    **No Request Body Required:**
-    This is a GET request - no request body needed.
-    
+    - To reload or refresh the personalized content in the UI
+    - After a session break or reconnect
+    - To display the current goal, missions, and recommendations
+    - For offline/caching scenarios
+
+    **Authentication:**
+    - Requires a valid Bearer token in the `Authorization` header.
+
+    **Request:**
+    - Method: `GET`
+    - URL: `/api/personalised`
+    - No request body required.
+
+    **Response:**
+    - `status`: `"INITIAL"` if only the initial goal is present, `"CLARIFIED"` if the user has clarified their goal.
+    - `messages`: List of all assistant/user messages for the session (may be empty if no messages yet).
+    - `personalisation`: The current personalized data, including:
+        - `hero`: `{ "title": str, "description": str }`
+        - `process`: List of process steps (may be empty)
+        - `goal`: The current goal description (str)
+        - `caseStudies`: List of case study objects (may be empty if none found)
+        - `whyThisCaseStudiesWereSelected`: Explanation for the case study selection (str, may be empty)
+        - `missions`: List of mission objects (may be empty)
+        - `why`: Reasoning for the personalized plan (str, may be empty)
+        - `fallbackToGenericData`: Boolean indicating if generic data was used
+
     **Response Example:**
     ```json
     {
-        "headline": "AI Agent for Restaurants: Increase Table Turnover with Contextual Suggestions",
-        "goal": {
-            "description": "Build an AI solution for restaurant operations: I want to build an AI agent for restaurants",
-            "category": "hospitality",
-            "priority": "high"
-        },
-        "missions": [
+        "status": "CLARIFIED",
+        "messages": [
             {
-                "id": "defineMetrics",
-                "title": "Define Success Metrics",
-                "points": 15,
-                "status": "pending"
+                "type": "user",
+                "content": "I want to build an AI agent for restaurants",
+                "timestamp": "2024-06-01T12:00:00Z"
             },
             {
-                "id": "sketchFlow",
-                "title": "Sketch User Flow",
-                "points": 15,
-                "status": "pending"
+                "type": "assistant",
+                "content": "Great! Let's get started...",
+                "timestamp": "2024-06-01T12:00:01Z"
             }
+            // ... more messages
         ],
-        "recommended_case_studies": [
-            {
-                "id": "cs1",
-                "title": "Booking Optimizer",
-                "summary": "Reduced booking latency by 80% with AI-powered recommendations"
-            },
-            {
-                "id": "cs2",
-                "title": "Menu Intelligence",
-                "summary": "Increased revenue 30% through personalized menu suggestions"
-            }
-        ]
-    }
-    ```
-    
-    **Usage Example:**
-    ```javascript
-    const accessToken = localStorage.getItem('access_token');
-    
-    const response = await fetch('/api/personalised', {
-        method: 'GET',
-        headers: {
-            'Authorization': `Bearer ${accessToken}`
+        "personalisation": {
+            "hero": {"title": "AI Agent for Restaurants", "description": "A solution to optimize restaurant operations."},
+            "process": [
+                {"name": "Define Success Metrics", "description": "Identify KPIs for your restaurant AI agent."}
+            ],
+            "goal": "Build an AI agent for restaurants",
+            "caseStudies": [
+                {
+                    "id": "case-1",
+                    "title": "Smart Table Management",
+                    "description": "...",
+                    "shortDescription": "...",
+                    "thumbnail": "..."
+                }
+            ],
+            "whyThisCaseStudiesWereSelected": "These case studies are relevant to your goal.",
+            "missions": [
+                {"id": "defineMetrics", "title": "Define Success Metrics", "category": "planning", "points": 15, "status": "pending"}
+            ],
+            "why": "Personalized plan based on your input.",
+            "fallbackToGenericData": false
         }
-    });
-    
-    if (response.ok) {
-        const personalization = await response.json();
-        
-        // Update UI with personalized content
-        document.getElementById('headline').textContent = personalization.headline;
-        document.getElementById('goal-desc').textContent = personalization.goal.description;
-        
-        // Render missions
-        const missionsList = personalization.missions.map(mission => 
-            `<li>${mission.title} (${mission.points} points)</li>`
-        ).join('');
-        document.getElementById('missions').innerHTML = missionsList;
     }
     ```
-    
-    **Error Cases:**
-    - **401 Unauthorized**: Missing or invalid Authorization header
-    - **404 Not Found**: Session not found
-    - **404 Not Found**: No personalized content found (haven't submitted goal yet)
-    - **500 Internal Server Error**: Personalization retrieval failed
-    
-    **Response Data Structure:**
-    - **headline**: Catchy title for your project/goal
-    - **goal**: Structured goal object with description, category, priority
-    - **missions**: Array of available missions with IDs, titles, points, status
-    - **recommended_case_studies**: Relevant case studies for inspiration
-    
-    **Integration Tips:**
-    - Cache this data in your frontend for offline access
-    - Use mission IDs for completion tracking
-    - Display case studies as inspiration/examples
-    - Show progress by comparing mission statuses with `/api/progress`
-    
-    **Workflow Context:**
-    1. User submits goal via `/api/goal` → personalization created
-    2. User can clarify via `/api/clarify` → personalization updated  
-    3. Use this endpoint → retrieve current personalization
-    4. Complete missions via `/api/mission/complete`
-    5. Check progress via `/api/progress`
-    """
-    # Get session data
-    # session_data = await session_manager.get_session(session_id)
-    if not session_data:
-        raise_http_error(404, "Session not found")
-    
-    if not session_data.goal:
-        raise_http_error(404, "No personalized content found. Please submit a goal first.")
 
-    
-    # Optimized workflow
-    
+    **Error Responses:**
+    - `401 Unauthorized`: Missing or invalid Authorization header.
+    - `404 Not Found`: Session not found or no personalized content available (e.g., if the user hasn't submitted a goal yet).
+    - `500 Internal Server Error`: Unexpected error during personalization retrieval.
+    """
+
     try:
-        return ClarifyResponse(
-            hero={"title": "AI Agent for Restaurants: Increase Table Turnover with Contextual Suggestions", "description": "Build an AI solution for restaurant operations: I want to build an AI agent for restaurants"},
-            process=[{"name": "Define Success Metrics", "description": "Define success metrics for your AI agent for restaurants"}, {"name": "Sketch User Flow", "description": "Sketch user flow for your AI agent for restaurants"}],
-            goal=session_data.goal,
-            caseStudies=[{"id": "cs1", "title": "Booking Optimizer", "summary": "Reduced booking latency by 80% with AI-powered recommendations"}, {"id": "cs2", "title": "Menu Intelligence", "summary": "Increased revenue 30% through personalized menu suggestions"}],
-            whyThisCaseStudiesWereSelected="",
-            missions=[{"id": "defineMetrics", "title": "Define Success Metrics", "points": 15}, {"id": "sketchFlow", "title": "Sketch User Flow", "points": 15}],
-            why=""
+        history = await get_history(session_id)
+        messages_list = await history.aget_messages()
+
+        # Determine status and extract personalisation data
+        status = "INITIAL"
+        messages_count = len(messages_list)
+        personalised_data = None
+        messages = []  # Initialize as empty list instead of None
+
+        if messages_count >= 3:
+            if messages_count >= 5:
+                status = "CLARIFIED"
+                # Extract the clarification response (5th message)
+                clarification_message = messages_list[4]
+                
+                # Parse JSON from the clarification message
+                match = re.search(r'```json\n(.*?)\n```', clarification_message.content, re.DOTALL)
+                if match:
+                    json_string = match.group(1)
+                    try:
+                        response_data = json.loads(json_string)
+                        
+                        # Populate case studies from CMS by IDs if present
+                        case_ids = response_data.get("caseStudies", []) or []
+                        if isinstance(case_ids, list) and all(isinstance(cid, str) for cid in case_ids):
+                            case_studies = await cms.get_case_studies_by_ids(case_ids)
+                            response_data["caseStudies"] = case_studies
+                        else:
+                            response_data["caseStudies"] = []
+
+                        # Ensure required flags/fields exist
+                        if "fallbackToGenericData" not in response_data:
+                            response_data["fallbackToGenericData"] = False
+
+                        # Create PersonalisedData object
+                        personalised_data = PersonalisedData(**response_data)
+                        
+                    except json.JSONDecodeError as e:
+                        print(f"JSON decoding failed: {e}")
+                        # Fallback to generic data if JSON parsing fails
+                        personalised_data = PersonalisedData(
+                            hero={"title": "Personalized Solution", "description": "Custom solution for your needs"},
+                            process=[],
+                            goal="Custom solution",
+                            caseStudies=[],
+                            whyThisCaseStudiesWereSelected="",
+                            missions=[],
+                            why="",
+                            fallbackToGenericData=True
+                        )
+                else:
+                    # No JSON found, create fallback data
+                    personalised_data = PersonalisedData(
+                        hero={"title": "Personalized Solution", "description": "Custom solution for your needs"},
+                        process=[],
+                        goal="Custom solution",
+                        caseStudies=[],
+                        whyThisCaseStudiesWereSelected="",
+                        missions=[],
+                        why="",
+                        fallbackToGenericData=True
+                    )
+                
+                # For CLARIFIED status, we return structured data, so messages can be empty
+                messages = []
+                    
+            else:
+                status = "GOAL_SET"
+                # Remove system message and return user messages
+                messages = messages_list[1:] if len(messages_list) > 1 else []
+                # For GOAL_SET status, we don't have structured data yet
+                personalised_data = PersonalisedData(
+                    hero={"title": "Goal Set", "description": "Your goal has been submitted and is being processed"},
+                    process=[],
+                    goal="Goal submitted",
+                    caseStudies=[],
+                    whyThisCaseStudiesWereSelected="",
+                    missions=[],
+                    why="",
+                    fallbackToGenericData=True
+                )
+        else:
+            # INITIAL status: User has just started, return basic data
+            status = "INITIAL"
+            messages = messages_list if messages_list else []
+            personalised_data = PersonalisedData(
+                hero={"title": "Welcome to Chain Labs", "description": "Let's get started with your AI project"},
+                process=[],
+                goal="No goal submitted yet",
+                caseStudies=[],
+                whyThisCaseStudiesWereSelected="",
+                missions=[],
+                why="",
+                fallbackToGenericData=True
+            )
+
+        # Safety check: ensure personalised_data is never None
+        if personalised_data is None:
+            raise_http_error(500, "Failed to generate personalization data")
+
+        return PersonalisedResponse(
+            status=status,
+            messages=messages,
+            personalisation=personalised_data
         )
+
     except Exception as e:
+        print(f"Error in get_personalized_content: {traceback.format_exc()}")
         raise_http_error(500, "Personalization engine error")

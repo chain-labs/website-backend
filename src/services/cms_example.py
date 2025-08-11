@@ -16,7 +16,7 @@ import asyncio
 import textwrap
 from typing import Dict, Any, Iterable, List, Optional
 
-import cms
+from src.services.cms_case_studies import cms
 
 
 def _brief(cs: Dict[str, Any], max_desc_chars: int = 160) -> str:
