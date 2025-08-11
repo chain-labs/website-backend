@@ -6,18 +6,14 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+import init_db
+
 from .utils.errors import ErrorResponse
 
 
 def create_app() -> FastAPI:
     """Create and configure the FastAPI application."""
 
-    @asynccontextmanager
-    async def lifespan(app: FastAPI):
-        from .database import engine, Base
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
-        yield
 
     app = FastAPI(
         title="Chain Labs Backend API",
@@ -25,7 +21,7 @@ def create_app() -> FastAPI:
         version="1.0.0",
         docs_url="/docs",
         redoc_url="/redoc",
-        lifespan=lifespan
+        # lifespan=lifespan
     )
     
     # Add CORS middleware
@@ -61,6 +57,11 @@ def create_app() -> FastAPI:
             }
         )
     
+
+    @app.on_event("startup")
+    async def startup_event():
+        await init_db.create_tables()
+        
     # Health check endpoint
     @app.get("/health")
     async def health_check():
