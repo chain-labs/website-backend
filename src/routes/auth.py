@@ -1,8 +1,9 @@
 """Authentication routes."""
 
+import traceback
+
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi.responses import JSONResponse
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models.auth import (
     SessionResponse, 
@@ -15,13 +16,13 @@ from ..auth.jwt_utils import jwt_manager
 from ..auth.middleware import get_current_session
 from ..services.session_manager import session_manager
 from ..utils.errors import raise_http_error, create_error_response
-from ..database import get_db
+from ..database import get_connection
 
 router = APIRouter(prefix="/api/auth", tags=["Authentication"])
 
 
 @router.post("/session", response_model=SessionResponse)
-async def create_session(request: Request, db: AsyncSession = Depends(get_db)):
+async def create_session(request: Request):
     """
     Create a new anonymous session with JWT tokens.
     
@@ -71,29 +72,31 @@ async def create_session(request: Request, db: AsyncSession = Depends(get_db)):
     - Use refresh_token to get new tokens when needed
     """
     try:
-        # Generate session ID and tokens
-        session_id = await jwt_manager.generate_session_id(db, request)
-        print(f"Session ID: {session_id}")
-        access_token = await jwt_manager.create_access_token(session_id)
-        print(f"Access Token: {access_token}")
-        refresh_token = await jwt_manager.create_refresh_token(session_id)
-        print(f"Refresh Token: {refresh_token}")
-        
-        # Create session in memory
-        await session_manager.create_session(session_id)
-        
-        return SessionResponse(
-            access_token=access_token,
-            expires_in=jwt_manager.expiry_seconds,
-            refresh_token=refresh_token,
-            refresh_expires_in=jwt_manager.expiry_seconds
-        )
+        async with get_connection() as conn:
+            # Generate session ID and tokens
+            session_id = await jwt_manager.generate_session_id(conn, request)
+            print(f"Session ID: {session_id}")
+            access_token = await jwt_manager.create_access_token(session_id)
+            print(f"Access Token: {access_token}")
+            refresh_token = await jwt_manager.create_refresh_token(session_id)
+            print(f"Refresh Token: {refresh_token}")
+            
+            # Create session in memory
+            await session_manager.create_session(session_id)
+            
+            return SessionResponse(
+                access_token=access_token,
+                expires_in=jwt_manager.expiry_seconds,
+                refresh_token=refresh_token,
+                refresh_expires_in=jwt_manager.expiry_seconds
+            )
     except Exception as e:
+        print("JWT Exception:", traceback.format_exc())
         raise_http_error(500, "JWT generation failed")
 
 
 @router.post("/refresh", response_model=RefreshResponse)
-async def refresh_token(request: RefreshRequest, db: AsyncSession = Depends(get_db)):
+async def refresh_token(request: RefreshRequest):
     """
     Exchange a valid refresh token for new access and refresh tokens.
     
@@ -155,33 +158,34 @@ async def refresh_token(request: RefreshRequest, db: AsyncSession = Depends(get_
     - Failed refresh attempts may indicate compromised tokens
     """
     try:
-        # Validate refresh token
-        if await session_manager.is_token_revoked(request.refresh_token):
-            raise_http_error(401, "Refresh token has been revoked")
-        
-        # Decode the refresh token to get session ID
-        session_id = jwt_manager.get_session_id_from_token(request.refresh_token)
-        
-        # Check if session exists
-        session_data = await session_manager.get_session(session_id)
-        if not session_data:
-            raise_http_error(401, "Session not found")
-        
-        # Generate new tokens
-        new_access_token = jwt_manager.create_access_token(session_id)
-        new_refresh_token = jwt_manager.create_refresh_token(session_id)
+        async with get_connection() as conn:
+            # Validate refresh token
+            if await session_manager.is_token_revoked(request.refresh_token):
+                raise_http_error(401, "Refresh token has been revoked")
 
-        await jwt_manager.update_session_activity(session_id, db)
-        
-        # Optionally revoke old refresh token
-        await session_manager.revoke_token(request.refresh_token)
-        
-        return RefreshResponse(
-            access_token=new_access_token,
-            expires_in=jwt_manager.expiry_seconds,
-            refresh_token=new_refresh_token,
-            refresh_expires_in=jwt_manager.expiry_seconds
-        )
+            # Decode the refresh token to get session ID
+            session_id = jwt_manager.get_session_id_from_token(request.refresh_token)
+            
+            # Check if session exists
+            session_data = await session_manager.get_session(session_id)
+            if not session_data:
+                raise_http_error(401, "Session not found")
+
+            # Generate new tokens
+            new_access_token = await jwt_manager.create_access_token(session_id)
+            new_refresh_token = await jwt_manager.create_refresh_token(session_id)
+
+            await jwt_manager.update_session_activity(session_id, conn)
+
+            # Optionally revoke old refresh token
+            await session_manager.revoke_token(request.refresh_token)
+
+            return RefreshResponse(
+                access_token=new_access_token,
+                expires_in=jwt_manager.expiry_seconds,
+                refresh_token=new_refresh_token,
+                refresh_expires_in=jwt_manager.expiry_seconds
+            )
     except HTTPException:
         raise
     except Exception as e:
@@ -191,7 +195,6 @@ async def refresh_token(request: RefreshRequest, db: AsyncSession = Depends(get_
 @router.delete("/session", response_model=RevokeResponse)
 async def revoke_session(
     request: RevokeRequest,
-    db: AsyncSession = Depends(get_db)
 ):
     """
     Revoke (blacklist) a refresh token, ending the session.
@@ -266,20 +269,23 @@ async def revoke_session(
     - For complete logout, client should also discard the access token
     """
     try:
-        # Add token to revoked list
-        await session_manager.revoke_token(request.refresh_token)
+        async with get_connection() as conn:
+            # Add token to revoked list
+            await session_manager.revoke_token(request.refresh_token)
 
-        payload = jwt_manager.decode_token(request.refresh_token)
-        session_id = payload.session_id
-        
-        # Get the session
-        session = await jwt_manager.get_session(session_id, db)
-        if session:
-            # Mark session as inactive
-            session.is_active = False
-            db.add(session)
-            await db.commit()
-        
-        return RevokeResponse(revoked=True)
+            payload = jwt_manager.decode_token(request.refresh_token)
+            session_id = payload.session_id
+            
+            # Get the session
+            session = await jwt_manager.get_session(session_id, conn)
+            if session:
+                # Mark session as inactive (update in DB)
+                await conn.execute(
+                    "UPDATE sessions SET is_active = FALSE WHERE id = %s",
+                    (session_id,)
+                )
+                await conn.commit()
+            
+            return RevokeResponse(revoked=True)
     except Exception as e:
         raise_http_error(500, "Revocation failed")

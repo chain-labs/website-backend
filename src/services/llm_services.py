@@ -14,14 +14,17 @@ from src.database import DATABASE_URL
 
 
 
-if "RAILWAY_DEPLOYMENT_ID" in os.environ:
-    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.7, api_key=OPENAI_API_KEY)
-else:
-    llm = ChatOllama(model="llama3", temperature=0.7)
+# if "RAILWAY_DEPLOYMENT_ID" in os.environ:
+llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.7, api_key=OPENAI_API_KEY)
+# else:
+    # llm = ChatOllama(model="llama3", temperature=0.7)
 
 async def get_history(session_id: str) -> PostgresChatMessageHistory:
     # Convert SQLAlchemy URL to standard PostgreSQL connection string
     db_url = DATABASE_URL.replace('postgresql+psycopg://', 'postgresql://')
+    sync_connection = psycopg.connect(db_url)
     async_connection = await psycopg.AsyncConnection.connect(db_url)
-    return PostgresChatMessageHistory("message_store", session_id, async_connection=async_connection)
-
+    table_name = "message_store"
+    PostgresChatMessageHistory.create_tables(sync_connection, table_name)
+    history =  PostgresChatMessageHistory(table_name, session_id, async_connection=async_connection)
+    return history

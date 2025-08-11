@@ -1,42 +1,61 @@
 import os
-from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
-from sqlalchemy.orm import declarative_base, sessionmaker
-from sqlalchemy.pool import NullPool
+import asyncio
+from contextlib import asynccontextmanager
+from typing import AsyncGenerator, Optional
+import psycopg
+from psycopg.rows import dict_row
+from psycopg_pool import AsyncConnectionPool
+
+# Database connection string
+DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://admin:admin123@localhost:5432/chainlabs")
 
 
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql+psycopg://admin:admin123@localhost:5432/chainlabs")
+_pool: Optional[AsyncConnectionPool] = None
 
-engine = create_async_engine(
-    DATABASE_URL, 
-    echo=True,
-    future=True,
-    pool_pre_ping=True,
-    poolclass=NullPool
-)
+async def init_db() -> None:
+    """Initialize the database connection pool."""
+    global _pool
+    if _pool is None:
+        _pool = AsyncConnectionPool(
+            conninfo=DATABASE_URL,
+            min_size=1,
+            max_size=10,
+            timeout=30,
+            max_idle=300,
+            num_workers=3,
+            kwargs={"row_factory": dict_row}
+        )
+        await _pool.wait()
 
-async_session_factory = async_sessionmaker(
-    bind=engine,
-    class_=AsyncSession,
-    expire_on_commit=False,
-    autoflush=False
-)
+async def close_db() -> None:
+    """Close all connections in the pool."""
+    global _pool
+    if _pool is not None:
+        await _pool.close()
+        _pool = None
 
-Base = declarative_base()
-
-from src.models.db.db_models import *
-
-async def get_db() -> AsyncSession:
-    """Dependency that provides a database session"""
-
-    async with async_session_factory() as session:
+@asynccontextmanager
+async def get_connection() -> AsyncGenerator[psycopg.AsyncConnection, None]:
+    """Get a database connection from the pool."""
+    if _pool is None:
+        await init_db()
+    
+    async with _pool.connection() as conn:
         try:
-            yield session
-            await session.commit()
+            yield conn
         except Exception:
-            await session.rollback()
+            await conn.rollback()
             raise
-        finally:
-            await session.close()
+
+@asynccontextmanager
+async def transaction() -> AsyncGenerator[psycopg.AsyncConnection, None]:
+    """Get a connection with an active transaction."""
+    async with get_connection() as conn:
+        async with conn.transaction():
+            yield conn
+
+
+
 
     
     

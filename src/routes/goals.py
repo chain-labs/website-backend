@@ -8,10 +8,8 @@ from fastapi import APIRouter, Depends
 from datetime import datetime
 
 import psycopg
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm.attributes import get_history
 
-from src.database import DATABASE_URL, get_db
+from src.database import DATABASE_URL
 
 from ..models.goal import (
     GoalRequest,
