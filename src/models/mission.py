@@ -1,7 +1,7 @@
 """Mission and progress related Pydantic models."""
 
 from typing import Any, Dict, List, Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from .goal import Mission
 
@@ -22,14 +22,14 @@ class ProgressResponse(BaseModel):
 
 class MissionArtifact(BaseModel):
     """Mission completion artifact."""
-    answer: str
+    answer: str = Field(..., description="The answer/artifact for the mission")
     # Can contain additional fields as needed
 
 
 class CompleteMissionRequest(BaseModel):
     """Request to complete a mission."""
-    mission_id: str
-    artifact: MissionArtifact
+    mission_id: str = Field(..., description="ID of the mission to complete")
+    artifact: MissionArtifact = Field(..., description="The completion artifact")
 
 
 class CompleteMissionResponse(BaseModel):

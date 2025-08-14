@@ -243,18 +243,16 @@ async def clarify_goal(
         raise_http_error(400, "Clarification cannot be empty")
     
     try:
-
         clarification_response = await parse_user_clarification(request.clarification, session_id)
-        # print(f"Clarification Response: {clarification_response}")
-        match = re.search(r'```json\n(.*?)\n```', clarification_response, re.DOTALL) # Template Literal
+
+        # Parse the JSON response
+        match = re.search(r'```json\n(.*?)\n```', clarification_response, re.DOTALL)
         if match:
             json_string = match.group(1)
-            # Step 2: Parse the JSON
             try:
                 response_data = json.loads(json_string)
-                print(f"JSON response:{response_data}")
-
-                # Populate case studies from CMS by IDs if present
+                
+                # Populate case studies from CMS
                 case_ids = response_data.get("caseStudies", []) or []
                 if isinstance(case_ids, list) and all(isinstance(cid, str) for cid in case_ids):
                     case_studies = await cms.get_case_studies_by_ids(case_ids)
@@ -262,16 +260,71 @@ async def clarify_goal(
                 else:
                     response_data["caseStudies"] = []
 
-                # Ensure required flags/fields exist
+                # Validate and fix mission data to ensure required fields
+                if response_data.get("missions"):
+                    validated_missions = []
+                    for mission in response_data["missions"]:
+                        # Ensure all required fields are present
+                        validated_mission = {
+                            "id": mission.get("id", ""),
+                            "title": mission.get("title", mission.get("name", "Untitled Mission")),
+                            "description": mission.get("description", mission.get("desc", "Mission description")),
+                            "points": mission.get("points", mission.get("base_points", 10)),
+                            "status": mission.get("status", "pending")
+                        }
+                        validated_missions.append(validated_mission)
+                    response_data["missions"] = validated_missions
+
+                # Ensure required fields exist
                 if "fallbackToGenericData" not in response_data:
                     response_data["fallbackToGenericData"] = False
-
-                return ClarifyResponse(
-                    **response_data
-                )
+                
+                # Store session_progress immediately after LLM response
+                try:
+                    # Extract case study IDs for storage
+                    case_ids_for_storage = [cs.get("id") for cs in response_data.get("caseStudies", []) if cs.get("id")]
+                    
+                    # Prepare missions for storage
+                    missions_full = []
+                    if response_data.get("missions"):
+                        for m in response_data.get("missions", []):
+                            if all(k in m for k in ("id", "title", "description", "points")):
+                                missions_full.append({
+                                    "id": m["id"],
+                                    "title": m["title"],
+                                    "description": m["description"],
+                                    "points": m["points"],
+                                    "status": m.get("status", "pending"),
+                                })
+                    
+                    # Store in session_progress
+                    await session_manager.upsert_session_progress(
+                        session_id,
+                        {
+                            "session_id": session_id,
+                            "goal": response_data.get("goal", ""),
+                            "hero": response_data.get("hero", {}),
+                            "process": response_data.get("process", []),
+                            "missions": missions_full,
+                            "case_studies": case_ids_for_storage,
+                            "why_this_case_studies_were_selected": response_data.get("whyThisCaseStudiesWereSelected", ""),
+                            "why": response_data.get("why", ""),
+                            "points_total": 0,  # Reset points for new clarification
+                            "call_unlocked": False,
+                        }
+                    )
+                    print("Session progress stored successfully in clarify route")
+                    
+                except Exception as e:
+                    print(f"Warning: Failed to store session progress: {e}")
+                    # Continue with response even if storage fails
+                
+                return ClarifyResponse(**response_data)
+                
             except json.JSONDecodeError as e:
                 print("JSON decoding failed:", e)
-
+                raise_http_error(500, "Invalid response format from AI service")
+                
     except Exception as e:
         print("LLM Exception:", traceback.format_exc())
         raise_http_error(500, f"LLM parse error: {str(e)}")
@@ -384,19 +437,22 @@ async def get_personalized_content(session_id: str = Depends(get_current_session
                             "title": m["title"],
                             "description": m["description"],
                             "points": m["points"],
+                            "status": m.get("status", "pending"),  # Include completion status
                         })
                 except Exception:
                     continue
 
             personalised_data = PersonalisedData(
-                hero=progress.get("hero", {"title": "", "description": ""}),
-                process=progress.get("process", []),
-                goal=progress.get("goal", ""),
+                hero=progress.get("hero", {"title": "", "description": ""}) or {"title": "", "description": ""},
+                process=progress.get("process", []) or [],
+                goal=progress.get("goal", "") or "",
                 caseStudies=case_studies,
-                whyThisCaseStudiesWereSelected=progress.get("why_this_case_studies_were_selected", ""),
-                    missions=missions_full,
-                why=progress.get("why", ""),
-                fallbackToGenericData=False
+                whyThisCaseStudiesWereSelected=progress.get("why_this_case_studies_were_selected", "") or "",
+                missions=missions_full,
+                why=progress.get("why", "") or "",
+                fallbackToGenericData=False,
+                points_total=progress.get("points_total", 0) or 0,
+                call_unlocked=progress.get("call_unlocked", False) or False
             )
 
             print("Sending Response from db storage")
@@ -441,6 +497,12 @@ async def get_personalized_content(session_id: str = Depends(get_current_session
                         # Ensure required flags/fields exist
                         if "fallbackToGenericData" not in response_data:
                             response_data["fallbackToGenericData"] = False
+                        
+                        # Add missing required fields
+                        if "points_total" not in response_data:
+                            response_data["points_total"] = 0
+                        if "call_unlocked" not in response_data:
+                            response_data["call_unlocked"] = False
 
                         # Create PersonalisedData object
                         personalised_data = PersonalisedData(**response_data)
@@ -456,7 +518,9 @@ async def get_personalized_content(session_id: str = Depends(get_current_session
                             whyThisCaseStudiesWereSelected="",
                             missions=[],
                             why="",
-                            fallbackToGenericData=True
+                            fallbackToGenericData=True,
+                            points_total=0,
+                            call_unlocked=False
                         )
                 else:
                     # No JSON found, create fallback data
@@ -468,69 +532,13 @@ async def get_personalized_content(session_id: str = Depends(get_current_session
                         whyThisCaseStudiesWereSelected="",
                         missions=[],
                         why="",
+                        points_total=0,
+                        call_unlocked=False,
                         fallbackToGenericData=True
                     )
                 
                 # For CLARIFIED status, we return structured data, so messages can be empty
                 messages = []
-
-                # Persist a projection into SessionProgress on first-time generation
-                try:
-                    if personalised_data is not None:
-                    # Store minimal snapshot: hero, goal, case study IDs, and initialize missions/progress
-                        case_ids: list[str] = []
-                        try:
-                            case_ids = [cs.id for cs in personalised_data.caseStudies] if personalised_data.caseStudies else []
-                        except Exception:
-                            case_ids = []
-
-                        # Persist full mission objects (id, title, description, points)
-                        missions_full = []
-                        try:
-                            if personalised_data.missions:
-                                for m in personalised_data.missions:
-                                    mission_id = getattr(m, "id", None)
-                                    title = getattr(m, "title", "")
-                                    description = getattr(m, "description", "")
-                                    points = getattr(m, "points", 0)
-                                    if mission_id and title and description:
-                                        missions_full.append({
-                                            "id": mission_id,
-                                            "title": title,
-                                            "description": description,
-                                            "points": points,
-                                        })
-                        except Exception:
-                            missions_full = []
-                        
-                        print("Inserting personalisation data into db")
-
-                        await session_manager.insert_session_progress_if_absent(
-                            session_id,
-                            {
-                                "session_id": session_id,
-                                "goal": personalised_data.goal,
-                                "hero": personalised_data.hero.model_dump(),
-                                "process": personalised_data.process,
-                                "missions": missions_full,
-                                "case_studies": case_ids,
-                                "why_this_case_studies_were_selected": personalised_data.whyThisCaseStudiesWereSelected,
-                                "why": personalised_data.why,
-                                "points_total": 0,
-                                "call_unlocked": False,
-                            },
-                        )
-                except Exception as e:
-                    print("ERROR: Failed to persist SessionProgress snapshot during clarify.")
-                    print(f"  session_id={session_id}")
-                    print(f"  goal={getattr(personalised_data, 'goal', None)}")
-                    print(f"  case_ids={case_ids}")
-                    print(f"  missions_status={missions_status}")
-                    print(f"  exception={e}")
-                    print(traceback.format_exc())
-                    # Non-fatal: continue serving response even if persistence fails
-                    pass
-                    
             else:
                 status = "GOAL_SET"
                 # Remove system message and return user messages
@@ -544,6 +552,8 @@ async def get_personalized_content(session_id: str = Depends(get_current_session
                     whyThisCaseStudiesWereSelected="",
                     missions=[],
                     why="",
+                    points_total=0,
+                    call_unlocked=False,
                     fallbackToGenericData=True
                 )
         else:
@@ -558,6 +568,8 @@ async def get_personalized_content(session_id: str = Depends(get_current_session
                 whyThisCaseStudiesWereSelected="",
                 missions=[],
                 why="",
+                points_total=0,
+                call_unlocked=False,
                 fallbackToGenericData=True
             )
 

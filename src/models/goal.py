@@ -1,6 +1,5 @@
 """Goal and personalization related Pydantic models."""
 
-from token import EQUAL
 from typing import List
 from langchain_core.messages import BaseMessage
 from pydantic import BaseModel
@@ -74,6 +73,7 @@ class ClarifyMission(BaseModel):
     title: str
     description: str
     points: int
+    status: str = "pending"  # pending, completed, cancelled
 
 
 class ClarifyResponse(BaseModel):
@@ -97,6 +97,8 @@ class PersonalisedData(BaseModel):
     missions: List[ClarifyMission]  # Use ClarifyMission here
     why: str
     fallbackToGenericData: bool
+    points_total: int
+    call_unlocked: bool
 
 class PersonalisedResponse(BaseModel):
     """Response model for personalised data"""
