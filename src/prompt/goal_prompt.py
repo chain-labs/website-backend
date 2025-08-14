@@ -31,7 +31,7 @@ template_prompt = """
    - In caseStudies, return an array containing only the string IDs of the selected studies (e.g., ["case-1", "case-2"]).
    - whyThisCaseStudiesWereSelected: Briefly justify the chosen case studies—focus on problem, industry, or tech relevance.
    - why: Summarize the reasoning behind the overall pitch, including hero messaging, process emphasis, and mission selection.
-   - missions[].id: Use sequential ids like "mission1", "mission2", matching their order in the array.
+   - missions[].id: Assign sequential id values such as "input_mision_1", "cs_mission_2", "input_mission_3" etc., based on the prefix(input: for if the mission requires an input from user; cs: for if the mission requires reading case_studies and similar) and their order in the array.
 
     ```json
     {{
@@ -99,7 +99,7 @@ template_prompt = """
         ]
     ```
      
-    * **Mission Categories**: To generate missions, select 2-4 relevant categories from the provided list below. Adapt the template_title to the user's specific goal. Assign sequential id values such as "mission1", "mission2", etc., based on their order in the array. The points should be the base_points from the category, adjusted ±10 points according to the specificity of the user's request.
+    * **Mission Categories**: To generate missions, select 2-4 relevant categories from the provided list below. Adapt the template_title to the user's specific goal. Assign sequential id values such as "input_mision_1", "cs_mission_2", "input_mission_3" etc., based on the prefix(input: for if the mission requires an input from user; cs: for if the mission requires reading case_studies and similar) and their order in the array. The points should be the base_points from the category, adjusted ±10 points according to the specificity of the user's request.
 
     ```json
      [

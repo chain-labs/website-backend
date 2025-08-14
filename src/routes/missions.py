@@ -1,5 +1,6 @@
 """Mission and progress routes."""
 
+import traceback
 from fastapi import APIRouter, Depends
 
 from ..models.mission import (
@@ -43,6 +44,7 @@ async def get_progress(session_id: str = Depends(get_current_session)):
     
     **No Request Body Required:**
     This is a GET request - no request body needed.
+    
     
     **Response Example:**
     ```json
@@ -124,12 +126,33 @@ async def get_progress(session_id: str = Depends(get_current_session)):
     - Check unlock status before showing premium features
     - Cache progress data and refresh after mission completions
     """
-    # Get session data
-    session_data = await session_manager.get_session(session_id)
-    if not session_data:
-        raise_http_error(404, "Session not found")
-    
     try:
+        # First try to get progress from database
+        progress = await session_manager.get_session_progress(session_id)
+        
+        if progress and progress.get("missions"):
+            # Convert stored missions to MissionStatus format
+            missions = progress.get("missions", [])
+            mission_statuses = []
+            
+            for mission in missions:
+                mission_statuses.append({
+                    "id": mission.get("id"),
+                    "status": mission.get("status", "pending"),
+                    "points": mission.get("points", 0)
+                })
+            
+            return ProgressResponse(
+                points_total=progress.get("points_total", 0),
+                missions=mission_statuses,
+                call_unlocked=progress.get("call_unlocked", False)
+            )
+        
+        # Fallback to in-memory session data
+        session_data = await session_manager.get_session(session_id)
+        if not session_data:
+            raise_http_error(404, "Session not found")
+        
         mission_statuses = session_data.get_mission_statuses()
         
         return ProgressResponse(
@@ -137,6 +160,7 @@ async def get_progress(session_id: str = Depends(get_current_session)):
             missions=mission_statuses,
             call_unlocked=session_data.is_call_unlocked()
         )
+        
     except Exception as e:
         raise_http_error(500, "Scoring engine error")
 
@@ -278,21 +302,37 @@ async def complete_mission(
     - Consider showing celebration UI for point awards
     - Refresh `/api/progress` to get complete updated status
     """
+    print(f"Completing mission: {request.mission_id} for Session: {session_id}")
     if not request.mission_id:
         raise_http_error(400, "Mission ID is required")
     
     if not request.artifact or not request.artifact.answer:
         raise_http_error(400, "Artifact answer is required")
     
-    # Get session data
-    session_data = await session_manager.get_session(session_id)
+    # Get session data - try to load from DB if not in memory
+    print(f"DEBUG: Loading session data for session_id: {session_id}")
+    session_data = await session_manager.get_or_create_session_from_db(session_id)
+    print(f"DEBUG: Session data loaded: {session_data is not None}")
+    
     if not session_data:
-        raise_http_error(404, "Session not found")
+        print(f"DEBUG: No session data found for session_id: {session_id}")
+        raise_http_error(404, "Session not found. Please submit a goal first via /api/goal")
+    
+    # Check if missions exist
+    print(f"DEBUG: Missions count: {len(session_data.missions) if session_data.missions else 0}")
+    if not session_data.missions:
+        print(f"DEBUG: No missions found in session data")
+        raise_http_error(404, "No missions found. Please submit a goal first via /api/goal")
     
     # Check if mission exists
+    print(f"DEBUG: Looking for mission_id: {request.mission_id}")
+    print(f"DEBUG: Available mission IDs: {[m.id for m in session_data.missions]}")
     mission = next((m for m in session_data.missions if m.id == request.mission_id), None)
     if not mission:
-        raise_http_error(404, "Mission not found")
+        print(f"DEBUG: Mission not found: {request.mission_id}")
+        raise_http_error(404, f"Mission '{request.mission_id}' not found. Available missions: {[m.id for m in session_data.missions]}")
+    
+    print(f"DEBUG: Mission found: {mission}")
     
     # Check if already completed
     if request.mission_id in session_data.completed_missions:
@@ -301,13 +341,34 @@ async def complete_mission(
     try:
         # Complete the mission
         points_awarded = session_data.complete_mission(request.mission_id)
+        print(f"Points awarded: {points_awarded}")
         if points_awarded is None:
             raise_http_error(500, "Failed to complete mission")
         
-        # Get next mission
+        # Update mission status in the database
+        await session_manager.update_mission_status(
+            session_id, 
+            request.mission_id, 
+            "completed", 
+            session_data.points_total
+        )
+
+        print(f"Completed mission: {request.mission_id}")
+        
+        # Get next mission from actual session data
         next_mission = None
         if len(session_data.completed_missions) < len(session_data.missions):
-            next_mission = mock_data_service.get_next_mission(session_data.completed_missions)
+            # Find the first incomplete mission
+            for mission in session_data.missions:
+                if mission.id not in session_data.completed_missions:
+                    next_mission = {
+                        "id": mission.id,
+                        "title": mission.title,
+                        "points": mission.points,
+                        "category": mission.category,
+                        "status": mission.status
+                    }
+                    break
         
         return CompleteMissionResponse(
             points_awarded=points_awarded,
@@ -316,8 +377,7 @@ async def complete_mission(
             next_mission=next_mission
         )
     except Exception as e:
-        if isinstance(e, Exception) and hasattr(e, 'status_code'):
-            raise
+        print(f"Error in complete_mission: {e}", traceback.format_exc())
         raise_http_error(500, "Scoring update failure")
 
 
@@ -449,11 +509,24 @@ async def check_unlock_status(session_id: str = Depends(get_current_session)):
     - Use `/api/mission/complete` to actually unlock features
     - Response `call_unlocked` field matches `/api/progress` response
     """
-    # Get session data
-    session_data = await session_manager.get_session(session_id)
-    if not session_data:
-        raise_http_error(404, "Session not found")
-    
-    return UnlockStatusResponse(
-        call_unlocked=session_data.is_call_unlocked()
-    )
+    try:
+        # First try to get progress from database
+        progress = await session_manager.get_session_progress(session_id)
+        
+        if progress:
+            return UnlockStatusResponse(
+                call_unlocked=progress.get("call_unlocked", False)
+            )
+        
+        # Fallback to in-memory session data
+        session_data = await session_manager.get_session(session_id)
+        if not session_data:
+            raise_http_error(404, "Session not found")
+        
+        return UnlockStatusResponse(
+            call_unlocked=session_data.is_call_unlocked()
+        )
+        
+    except Exception as e:
+        print(f"Error in check_unlock_status: {e}", traceback.format_exc())
+        raise_http_error(500, "Failed to check unlock status")
