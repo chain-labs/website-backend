@@ -1,15 +1,10 @@
 """Goal and personalization routes."""
 
-from email import message
 import json
 import re
 import traceback
 from fastapi import APIRouter, Depends
 from datetime import datetime
-
-import psycopg
-
-from src.database import DATABASE_URL
 from src.services.llm_services import get_history
 
 from ..models.goal import (
@@ -140,9 +135,9 @@ async def submit_goal(
         structured_goal = GoalResponse(assistantMessage={"message": goal_response, "datetime": datetime.now().isoformat()}, history=[user_message, {"role": "assistant", "message": goal_response, "datetime": datetime.now().isoformat()}])
         return structured_goal
 
-    except Exception as e:
+    except Exception:
         print("LLM Exception:", traceback.format_exc())
-        raise_http_error(500, f"LLM parse error: {str(e)}")
+        raise_http_error(500, "LLM parse error")
 
 
 @router.post("/clarify", response_model=ClarifyResponse)
@@ -370,6 +365,49 @@ async def get_personalized_content(session_id: str = Depends(get_current_session
     """
 
     try:
+        # 1) Try to serve from persisted SessionProgress first
+        progress = await session_manager.get_session_progress(session_id)
+        if progress is not None:
+                # Build PersonalisedData from stored progress snapshot
+                # Fetch case studies if we have stored IDs
+            case_ids = progress.get("case_studies", []) or []
+            case_studies = await cms.get_case_studies_by_ids(case_ids) if case_ids else []
+
+                # Ensure missions are full objects; filter out any legacy status-only entries
+            raw_missions = progress.get("missions", []) or []
+            missions_full = []
+            for m in raw_missions:
+                try:
+                    if all(k in m for k in ("id", "title", "description", "points")):
+                        missions_full.append({
+                            "id": m["id"],
+                            "title": m["title"],
+                            "description": m["description"],
+                            "points": m["points"],
+                        })
+                except Exception:
+                    continue
+
+            personalised_data = PersonalisedData(
+                hero=progress.get("hero", {"title": "", "description": ""}),
+                process=progress.get("process", []),
+                goal=progress.get("goal", ""),
+                caseStudies=case_studies,
+                whyThisCaseStudiesWereSelected=progress.get("why_this_case_studies_were_selected", ""),
+                    missions=missions_full,
+                why=progress.get("why", ""),
+                fallbackToGenericData=False
+            )
+
+            print("Sending Response from db storage")
+
+            return PersonalisedResponse(
+                status="CLARIFIED",
+                messages=[],
+                personalisation=personalised_data
+            )
+
+        # 2) Otherwise compute from history (first-time flow)
         history = await get_history(session_id)
         messages_list = await history.aget_messages()
 
@@ -435,6 +473,63 @@ async def get_personalized_content(session_id: str = Depends(get_current_session
                 
                 # For CLARIFIED status, we return structured data, so messages can be empty
                 messages = []
+
+                # Persist a projection into SessionProgress on first-time generation
+                try:
+                    if personalised_data is not None:
+                    # Store minimal snapshot: hero, goal, case study IDs, and initialize missions/progress
+                        case_ids: list[str] = []
+                        try:
+                            case_ids = [cs.id for cs in personalised_data.caseStudies] if personalised_data.caseStudies else []
+                        except Exception:
+                            case_ids = []
+
+                        # Persist full mission objects (id, title, description, points)
+                        missions_full = []
+                        try:
+                            if personalised_data.missions:
+                                for m in personalised_data.missions:
+                                    mission_id = getattr(m, "id", None)
+                                    title = getattr(m, "title", "")
+                                    description = getattr(m, "description", "")
+                                    points = getattr(m, "points", 0)
+                                    if mission_id and title and description:
+                                        missions_full.append({
+                                            "id": mission_id,
+                                            "title": title,
+                                            "description": description,
+                                            "points": points,
+                                        })
+                        except Exception:
+                            missions_full = []
+                        
+                        print("Inserting personalisation data into db")
+
+                        await session_manager.insert_session_progress_if_absent(
+                            session_id,
+                            {
+                                "session_id": session_id,
+                                "goal": personalised_data.goal,
+                                "hero": personalised_data.hero.model_dump(),
+                                "process": personalised_data.process,
+                                "missions": missions_full,
+                                "case_studies": case_ids,
+                                "why_this_case_studies_were_selected": personalised_data.whyThisCaseStudiesWereSelected,
+                                "why": personalised_data.why,
+                                "points_total": 0,
+                                "call_unlocked": False,
+                            },
+                        )
+                except Exception as e:
+                    print("ERROR: Failed to persist SessionProgress snapshot during clarify.")
+                    print(f"  session_id={session_id}")
+                    print(f"  goal={getattr(personalised_data, 'goal', None)}")
+                    print(f"  case_ids={case_ids}")
+                    print(f"  missions_status={missions_status}")
+                    print(f"  exception={e}")
+                    print(traceback.format_exc())
+                    # Non-fatal: continue serving response even if persistence fails
+                    pass
                     
             else:
                 status = "GOAL_SET"
@@ -466,6 +561,7 @@ async def get_personalized_content(session_id: str = Depends(get_current_session
                 fallbackToGenericData=True
             )
 
+
         # Safety check: ensure personalised_data is never None
         if personalised_data is None:
             raise_http_error(500, "Failed to generate personalization data")
@@ -476,6 +572,6 @@ async def get_personalized_content(session_id: str = Depends(get_current_session
             personalisation=personalised_data
         )
 
-    except Exception as e:
+    except Exception:
         print(f"Error in get_personalized_content: {traceback.format_exc()}")
         raise_http_error(500, "Personalization engine error")

@@ -53,3 +53,20 @@ dev = [
     "mkdocs>=1.5.3",
     "mkdocs-material>=9.4.5",
 ]
+
+[tool.black]
+line-length = 100
+target-version = ["py313"]
+
+[tool.isort]
+profile = "black"
+line_length = 100
+src_paths = ["src", "tests"]
+
+[tool.pylint.main]
+disable = [
+]
+
+[tool.pylint.format]
+max-line-length = 100
+ignore-long-lines = "^\\s*(# )?<?https?://\\\\S+>?$"

@@ -1,6 +1,5 @@
 import asyncio
 from langchain.prompts import ChatPromptTemplate
-from ..services.mock_data import mock_data_service
 from typing import List
 from langchain.schema import BaseMessage
 
@@ -41,7 +40,7 @@ template_prompt = """
         "description": "<10-15 words: compelling value proposition>"
     }},
     "process": [
-        {{ "name": "Problem Framing (Understand Why)", "description": "<20-35 words: how we understand their specific challenge>" }},
+        {{ "name": "Problem Framing (Understand Why)", "description": "<20-35 words: how we understand their specific challenge>"  }},
         {{ "name": "Discovery", "description": "<20-35 words: how we explore their technical requirements>" }},
         {{ "name": "Solution Prototyping", "description": "<20-35 words: how we validate approach with quick proof-of-concept>" }},
         {{ "name": "Agile Development and Pilot", "description": "<20-35 words: how we build and test iteratively>" }},

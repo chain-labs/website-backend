@@ -23,8 +23,10 @@ async def init_db() -> None:
             timeout=30,
             max_idle=300,
             num_workers=3,
-            kwargs={"row_factory": dict_row}
+            kwargs={"row_factory": dict_row},
+            open=False
         )
+        await _pool.open()
         await _pool.wait()
 
 async def close_db() -> None:
