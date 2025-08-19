@@ -310,10 +310,10 @@ async def clarify_goal(
 
             return ClarifyResponse(**response_data)
 
-        except ValueError:
-            raise_http_error(500, "Invalid response format from AI service")
         except json.JSONDecodeError as e:
             print("JSON decoding failed:", e)
+            raise_http_error(500, "Invalid response format from AI service")
+        except ValueError:
             raise_http_error(500, "Invalid response format from AI service")
     except Exception as e:
         print("LLM Exception:", traceback.format_exc())
