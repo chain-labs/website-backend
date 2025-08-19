@@ -11,7 +11,7 @@ from src.prompt.chat_prompt import FOLLOWUP_PROMPT, USER_MESSAGE_CONTEXT, WELCOM
 from src.services.llm_services import get_history, llm
 from src.services.session_manager import session_manager
 from src.utils.errors import raise_http_error
-from src.utils.json_utils import FENCED_JSON_PATTERN, extract_json_from_fenced_block
+from src.utils.json_utils import extract_json_from_fenced_block
 
 
 class ChatService:
@@ -66,7 +66,7 @@ class ChatService:
             raise_http_error(404, "Session does not have a goal")
 
         if (len(messages) == 5):
-            print("Adding System prompt")
+            print("Adding follow up system prompt")
             messages.append(SystemMessage(content=FOLLOWUP_PROMPT))
             await history.aadd_messages(messages=[SystemMessage(content=FOLLOWUP_PROMPT)])
         

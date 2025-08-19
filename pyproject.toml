@@ -67,7 +67,7 @@ src_paths = ["src", "tests"]
 [tool.pylint.main]
 disable = [
     "trailing-whitespace",
-    "trailing-newline"
+    "trailing-newlines"
 ]
 
 [tool.pylint.format]
