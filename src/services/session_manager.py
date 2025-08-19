@@ -304,7 +304,7 @@ class SessionManager:
             traceback.print_exc()
             raise
 
-    async def update_mission_status(self, session_id: str, mission_id: str, status: str, points_total: int) -> None:
+    async def update_mission_status(self, session_id: str, mission_id: str, status: str, points_total: int, artifact_answer: Optional[str] = None) -> None:
         """Update a specific mission's status and points total in the database."""
         try:
             # First, get the current progress
@@ -322,6 +322,9 @@ class SessionManager:
                     # Update this mission's status
                     updated_mission = mission.copy()
                     updated_mission["status"] = status
+                    # Optionally persist the artifact answer for this mission
+                    if artifact_answer is not None and str(artifact_answer).strip() != "":
+                        updated_mission["artifact"] = {"answer": artifact_answer}
                     updated_missions.append(updated_mission)
                 else:
                     updated_missions.append(mission)

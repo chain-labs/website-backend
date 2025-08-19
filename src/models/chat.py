@@ -2,6 +2,7 @@
 
 from datetime import datetime
 from typing import Any, Dict, List, Optional
+from langchain_core.messages import BaseMessage
 from pydantic import BaseModel, Field
 
 from .mission import MissionStatus, Mission
@@ -17,7 +18,8 @@ class ChatContext(BaseModel):
 
 class ChatRequest(BaseModel):
     """Request model for chat endpoint."""
-    message: str = Field(..., min_length=1, description="The user's chat message")
+    init: Optional[bool] = False
+    message: str = Field(..., min_length=0, description="The user's chat message")
     context: ChatContext = Field(..., description="Context about where the user is on the site")
 
 
@@ -45,8 +47,9 @@ class ChatNavigation(BaseModel):
 class ChatResponse(BaseModel):
     """Response model for chat endpoint."""
     reply: str = Field(..., description="The assistant's response text")
-    history: List[ChatMessage] = Field(..., description="Full chat history")
-    followUpMissions: Optional[List[Mission]] = Field(None, description="New or updated missions")
+    history: List[BaseMessage] = Field(..., description="Full chat history")
+    followUpMissions: Optional[List[str]] = Field(None, description="New or updated missions")
     updatedProgress: Optional[ChatProgress] = Field(None, description="Progress snapshot for UI sync")
-    suggestedRead: Optional[List[CaseStudy]] = Field(None, description="Recommended case studies")
+    suggestedRead: Optional[List[str]] = Field(None, description="Recommended case studies")
     navigate: Optional[ChatNavigation] = Field(None, description="Frontend navigation instruction")
+    

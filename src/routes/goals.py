@@ -1,7 +1,6 @@
 """Goal and personalization routes."""
 
 import json
-import re
 import traceback
 from fastapi import APIRouter, Depends
 from datetime import datetime
@@ -17,10 +16,10 @@ from ..models.goal import (
 )
 from ..auth.middleware import get_current_session
 from ..services.session_manager import session_manager
-from ..services.mock_data import mock_data_service
 from ..utils.errors import raise_http_error
 from ..services.goal_parser import parse_user_clarification, parse_user_goal
 from ..services import cms
+from ..utils.json_utils import extract_json_from_fenced_block
 
 router = APIRouter(prefix="/api", tags=["Goals & Personalization"])
 
@@ -245,86 +244,77 @@ async def clarify_goal(
     try:
         clarification_response = await parse_user_clarification(request.clarification, session_id)
 
-        # Parse the JSON response
-        match = re.search(r'```json\n(.*?)\n```', clarification_response, re.DOTALL)
-        if match:
-            json_string = match.group(1)
+        # Parse the JSON response using utility
+        try:
+            response_data = extract_json_from_fenced_block(clarification_response)
+
+            # Populate case studies from CMS
+            case_ids = response_data.get("caseStudies", []) or ["case-1"]
+            if isinstance(case_ids, list) and all(isinstance(cid, str) for cid in case_ids):
+                case_studies = await cms.get_case_studies_by_ids(case_ids)
+                response_data["caseStudies"] = case_studies
+            else:
+                response_data["caseStudies"] = []
+
+            # Validate and fix mission data to ensure required fields
+            if response_data.get("missions"):
+                validated_missions = []
+                for mission in response_data["missions"]:
+                    validated_mission = {
+                        "id": mission.get("id", ""),
+                        "title": mission.get("title", mission.get("name", "Untitled Mission")),
+                        "description": mission.get("description", mission.get("desc", "Mission description")),
+                        "points": mission.get("points", mission.get("base_points", 10)),
+                        "status": mission.get("status", "pending")
+                    }
+                    validated_missions.append(validated_mission)
+                response_data["missions"] = validated_missions
+
+            # Ensure required fields exist
+            if "fallbackToGenericData" not in response_data:
+                response_data["fallbackToGenericData"] = False
+
+            # Store session_progress immediately after LLM response
             try:
-                response_data = json.loads(json_string)
-                
-                # Populate case studies from CMS
-                case_ids = response_data.get("caseStudies", []) or []
-                if isinstance(case_ids, list) and all(isinstance(cid, str) for cid in case_ids):
-                    case_studies = await cms.get_case_studies_by_ids(case_ids)
-                    response_data["caseStudies"] = case_studies
-                else:
-                    response_data["caseStudies"] = []
-
-                # Validate and fix mission data to ensure required fields
+                case_ids_for_storage = [cs.get("id") for cs in response_data.get("caseStudies", []) if cs.get("id")]
+                missions_full = []
                 if response_data.get("missions"):
-                    validated_missions = []
-                    for mission in response_data["missions"]:
-                        # Ensure all required fields are present
-                        validated_mission = {
-                            "id": mission.get("id", ""),
-                            "title": mission.get("title", mission.get("name", "Untitled Mission")),
-                            "description": mission.get("description", mission.get("desc", "Mission description")),
-                            "points": mission.get("points", mission.get("base_points", 10)),
-                            "status": mission.get("status", "pending")
-                        }
-                        validated_missions.append(validated_mission)
-                    response_data["missions"] = validated_missions
+                    for m in response_data.get("missions", []):
+                        if all(k in m for k in ("id", "title", "description", "points")):
+                            missions_full.append({
+                                "id": m["id"],
+                                "title": m["title"],
+                                "description": m["description"],
+                                "points": m["points"],
+                                "status": m.get("status", "pending"),
+                            })
 
-                # Ensure required fields exist
-                if "fallbackToGenericData" not in response_data:
-                    response_data["fallbackToGenericData"] = False
-                
-                # Store session_progress immediately after LLM response
-                try:
-                    # Extract case study IDs for storage
-                    case_ids_for_storage = [cs.get("id") for cs in response_data.get("caseStudies", []) if cs.get("id")]
-                    
-                    # Prepare missions for storage
-                    missions_full = []
-                    if response_data.get("missions"):
-                        for m in response_data.get("missions", []):
-                            if all(k in m for k in ("id", "title", "description", "points")):
-                                missions_full.append({
-                                    "id": m["id"],
-                                    "title": m["title"],
-                                    "description": m["description"],
-                                    "points": m["points"],
-                                    "status": m.get("status", "pending"),
-                                })
-                    
-                    # Store in session_progress
-                    await session_manager.upsert_session_progress(
-                        session_id,
-                        {
-                            "session_id": session_id,
-                            "goal": response_data.get("goal", ""),
-                            "hero": response_data.get("hero", {}),
-                            "process": response_data.get("process", []),
-                            "missions": missions_full,
-                            "case_studies": case_ids_for_storage,
-                            "why_this_case_studies_were_selected": response_data.get("whyThisCaseStudiesWereSelected", ""),
-                            "why": response_data.get("why", ""),
-                            "points_total": 0,  # Reset points for new clarification
-                            "call_unlocked": False,
-                        }
-                    )
-                    print("Session progress stored successfully in clarify route")
-                    
-                except Exception as e:
-                    print(f"Warning: Failed to store session progress: {e}")
-                    # Continue with response even if storage fails
-                
-                return ClarifyResponse(**response_data)
-                
-            except json.JSONDecodeError as e:
-                print("JSON decoding failed:", e)
-                raise_http_error(500, "Invalid response format from AI service")
-                
+                await session_manager.upsert_session_progress(
+                    session_id,
+                    {
+                        "session_id": session_id,
+                        "goal": response_data.get("goal", ""),
+                        "hero": response_data.get("hero", {}),
+                        "process": response_data.get("process", []),
+                        "missions": missions_full,
+                        "case_studies": case_ids_for_storage,
+                        "why_this_case_studies_were_selected": response_data.get("whyThisCaseStudiesWereSelected", ""),
+                        "why": response_data.get("why", ""),
+                        "points_total": 0,
+                        "call_unlocked": False,
+                    }
+                )
+                print("Session progress stored successfully in clarify route")
+            except Exception as e:
+                print(f"Warning: Failed to store session progress: {e}")
+
+            return ClarifyResponse(**response_data)
+
+        except json.JSONDecodeError as e:
+            print("JSON decoding failed:", e)
+            raise_http_error(500, "Invalid response format from AI service")
+        except ValueError:
+            raise_http_error(500, "Invalid response format from AI service")
     except Exception as e:
         print("LLM Exception:", traceback.format_exc())
         raise_http_error(500, f"LLM parse error: {str(e)}")
@@ -432,13 +422,17 @@ async def get_personalized_content(session_id: str = Depends(get_current_session
             for m in raw_missions:
                 try:
                     if all(k in m for k in ("id", "title", "description", "points")):
-                        missions_full.append({
+                        mission_entry = {
                             "id": m["id"],
                             "title": m["title"],
                             "description": m["description"],
                             "points": m["points"],
                             "status": m.get("status", "pending"),  # Include completion status
-                        })
+                        }
+                        # If artifact is present (e.g., from mission completion), propagate it
+                        if isinstance(m.get("artifact"), dict):
+                            mission_entry["artifact"] = m.get("artifact")
+                        missions_full.append(mission_entry)
                 except Exception:
                     continue
 
@@ -479,51 +473,33 @@ async def get_personalized_content(session_id: str = Depends(get_current_session
                 # Extract the clarification response (5th message)
                 clarification_message = messages_list[4]
                 
-                # Parse JSON from the clarification message
-                match = re.search(r'```json\n(.*?)\n```', clarification_message.content, re.DOTALL)
-                if match:
-                    json_string = match.group(1)
-                    try:
-                        response_data = json.loads(json_string)
-                        
-                        # Populate case studies from CMS by IDs if present
-                        case_ids = response_data.get("caseStudies", []) or []
-                        if isinstance(case_ids, list) and all(isinstance(cid, str) for cid in case_ids):
-                            case_studies = await cms.get_case_studies_by_ids(case_ids)
-                            response_data["caseStudies"] = case_studies
-                        else:
-                            response_data["caseStudies"] = []
+                # Parse JSON from the clarification message using utility
+                try:
+                    response_data = extract_json_from_fenced_block(clarification_message.content)
 
-                        # Ensure required flags/fields exist
-                        if "fallbackToGenericData" not in response_data:
-                            response_data["fallbackToGenericData"] = False
-                        
-                        # Add missing required fields
-                        if "points_total" not in response_data:
-                            response_data["points_total"] = 0
-                        if "call_unlocked" not in response_data:
-                            response_data["call_unlocked"] = False
+                    # Populate case studies from CMS by IDs if present
+                    case_ids = response_data.get("caseStudies", []) or []
+                    if isinstance(case_ids, list) and all(isinstance(cid, str) for cid in case_ids):
+                        case_studies = await cms.get_case_studies_by_ids(case_ids)
+                        response_data["caseStudies"] = case_studies
+                    else:
+                        response_data["caseStudies"] = []
 
-                        # Create PersonalisedData object
-                        personalised_data = PersonalisedData(**response_data)
-                        
-                    except json.JSONDecodeError as e:
-                        print(f"JSON decoding failed: {e}")
-                        # Fallback to generic data if JSON parsing fails
-                        personalised_data = PersonalisedData(
-                            hero={"title": "Personalized Solution", "description": "Custom solution for your needs"},
-                            process=[],
-                            goal="Custom solution",
-                            caseStudies=[],
-                            whyThisCaseStudiesWereSelected="",
-                            missions=[],
-                            why="",
-                            fallbackToGenericData=True,
-                            points_total=0,
-                            call_unlocked=False
-                        )
-                else:
-                    # No JSON found, create fallback data
+                    # Ensure required flags/fields exist
+                    if "fallbackToGenericData" not in response_data:
+                        response_data["fallbackToGenericData"] = False
+
+                    # Add missing required fields
+                    if "points_total" not in response_data:
+                        response_data["points_total"] = 0
+                    if "call_unlocked" not in response_data:
+                        response_data["call_unlocked"] = False
+
+                    # Create PersonalisedData object
+                    personalised_data = PersonalisedData(**response_data)
+                except (ValueError, json.JSONDecodeError) as e:
+                    print(f"JSON extraction/decoding failed: {e}")
+                    # Fallback to generic data if JSON parsing fails
                     personalised_data = PersonalisedData(
                         hero={"title": "Personalized Solution", "description": "Custom solution for your needs"},
                         process=[],
@@ -532,9 +508,9 @@ async def get_personalized_content(session_id: str = Depends(get_current_session
                         whyThisCaseStudiesWereSelected="",
                         missions=[],
                         why="",
+                        fallbackToGenericData=True,
                         points_total=0,
-                        call_unlocked=False,
-                        fallbackToGenericData=True
+                        call_unlocked=False
                     )
                 
                 # For CLARIFIED status, we return structured data, so messages can be empty

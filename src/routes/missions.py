@@ -345,12 +345,13 @@ async def complete_mission(
         if points_awarded is None:
             raise_http_error(500, "Failed to complete mission")
         
-        # Update mission status in the database
+        # Update mission status in the database and persist the artifact answer
         await session_manager.update_mission_status(
-            session_id, 
-            request.mission_id, 
-            "completed", 
-            session_data.points_total
+            session_id,
+            request.mission_id,
+            "completed",
+            session_data.points_total,
+            artifact_answer=request.artifact.answer,
         )
 
         print(f"Completed mission: {request.mission_id}")
