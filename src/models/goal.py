@@ -1,6 +1,6 @@
 """Goal and personalization related Pydantic models."""
 
-from typing import List
+from typing import List, Optional, Dict, Any
 from langchain_core.messages import BaseMessage
 from pydantic import BaseModel
 from datetime import datetime
@@ -74,6 +74,8 @@ class ClarifyMission(BaseModel):
     description: str
     points: int
     status: str = "pending"  # pending, completed, cancelled
+    # Optional artifact payload for completed missions (e.g. user's answer)
+    artifact: Optional[Dict[str, Any]] = None
 
 
 class ClarifyResponse(BaseModel):

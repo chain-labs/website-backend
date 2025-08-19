@@ -1,7 +1,11 @@
 """Chat endpoint routes."""
 
+import json
+import traceback
 from fastapi import APIRouter, Depends
 from typing import Dict, Any
+
+from src.utils.json_utils import FENCED_JSON_PATTERN, extract_json_from_fenced_block
 
 from ..models.chat import ChatRequest, ChatResponse
 from ..auth.middleware import get_current_session
@@ -170,24 +174,30 @@ async def chat_with_assistant(
     - All timestamps are in UTC ISO format
     """
     try:
-        # Get session data
-        session_data = await session_manager.get_session(session_id)
-        if not session_data:
-            raise_http_error(404, "Session not found")
+        # # Get session data
+        # session_data = await session_manager.get_session(session_id)
+        # if not session_data:
+        #     raise_http_error(404, "Session not found")
         
-        # Validate request
-        if not chat_request.message.strip():
-            raise_http_error(400, "Message cannot be empty")
+        # # Validate request
+        # if not chat_request.message.strip():
+        #     raise_http_error(400, "Message cannot be empty")
         
         # Generate AI response using chat service
-        response = await chat_service.generate_response(chat_request, session_data)
-        
+
+        response = await chat_service.ask(
+          session_id=session_id, 
+          message=chat_request.message, 
+          page=chat_request.context.page, 
+          section=chat_request.context.section
+        )
         return response
-        
     except Exception as e:
+        print("Error", traceback.format_exc())
         if hasattr(e, 'status_code'):
             # Re-raise HTTP errors
             raise e
         else:
             # Log and return generic error for unexpected exceptions
             raise_http_error(500, "AI assistant temporarily unavailable")
+

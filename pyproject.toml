@@ -66,8 +66,11 @@ src_paths = ["src", "tests"]
 
 [tool.pylint.main]
 disable = [
+    "trailing-whitespace",
+    "trailing-newline"
 ]
 
 [tool.pylint.format]
 max-line-length = 100
 ignore-long-lines = "^\\s*(# )?<?https?://\\\\S+>?$"
+

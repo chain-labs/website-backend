@@ -48,20 +48,18 @@ async def parse_user_goal(user_prompt: str, session_id: str) -> dict:
 
 
         base_chain = goalPromptTemplate | llm
-        await history.aadd_messages(messages=[SystemMessage(content=template_prompt), HumanMessage(content=user_prompt)])
-        
-        
+
         # Make the LLM call
         raw_response = await base_chain.ainvoke({"user_goal_input": user_prompt})
         logger.info("Received response from LLM")
-        
+
         # Log the raw response for debugging
         logger.debug(f"Raw response: {raw_response}")
-        
+
         # Parse the response
         try:
             response_content = raw_response.content
-            await history.aadd_messages(messages=[AIMessage(content=response_content)])
+            await history.aadd_messages(messages=[SystemMessage(content=template_prompt), HumanMessage(content=user_prompt), AIMessage(content=response_content)])
             logger.debug(f"Response content: {response_content}")
             messages = await history.aget_messages()
             print(messages)
