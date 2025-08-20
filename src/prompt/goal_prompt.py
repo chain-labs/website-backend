@@ -51,7 +51,20 @@ template_prompt = """
     "whyThisCaseStudiesWereSelected": "",
     "missions": [
         // 2-4 mission objects:
-        // {{ "id": "mission1" /* missionN for subsequent items */, "title": "<action-oriented title, 4-8 words>", "description": "<10-20 words>", "points": <10-50> }}
+        {{ 
+            "id": "mission1" /* missionN for subsequent items */, 
+            "title": "<action-oriented title, 4-8 words>", 
+            "description": "<10-20 words>", 
+            "points": <10-50>, 
+            "icon": "<A relevant icon to display along with this mission fetched from https://lucide.dev/icons>" 
+            "input": {{
+                "required": <boolean if user needs to enter an answer for this mission>,
+                "type": <type of input: text | number | phone number | email>,
+                "placeholder": "<placeholder text for input box for the mission>"
+            }},
+            "missionType": "<Choose from "READ_CASE_STUDY" | "ADDITIONAL_INPUT" | "VIEW_PROCESS" | "CHAT" | "CALL_OUR_AI_AGENT" | "READ_ABOUT_US" or similar>",
+            "options": {{ "targetCaseStudyId": "<if mission requires to read case study, then mention caseStudy id here else N/A>" }}
+        }}
     ],
     "why": "",
     "fallbackToGenericData": false
@@ -99,11 +112,11 @@ template_prompt = """
         ]
     ```
      
-    * **Mission Categories**: To generate missions, select 2-4 relevant categories from the provided list below. Adapt the template_title to the user's specific goal. Assign sequential id values such as "input_mision_1", "cs_mission_2", "input_mission_3" etc., based on the prefix(input: for if the mission requires an input from user; cs: for if the mission requires reading case_studies and similar) and their order in the array. The points should be the base_points from the category, adjusted ±10 points according to the specificity of the user's request.
+    * **Mission Categories**: To generate missions, select 2-4 relevant categories from the provided list below. Adapt the template_title to the user's specific goal.
 
     ```json
      [
-       {{"id": "enter-goal", "category": "Onboarding", "template_title": "Enter your primary goal", "base_points": 10}},
+       {{"id": "enter-goal", "category": "Onboarding", "template_title": "Enter your primary goal", "base_points": 10, icon: ""}},
        {{"id": "clarify-goal", "category": "Onboarding", "template_title": "Clarify your goal", "base_points": 20}},
        {{"id": "read-case-study", "category": "Learning", "template_title": "Read the recommended case study: [case title]", "base_points": 10}},
        {{"id": "ask-follow-up-case-study", "category": "Engagement", "template_title": "Ask a follow-up question about the case study", "base_points": 10}},
@@ -116,7 +129,8 @@ template_prompt = """
 
     * **Unclear Initial Goal**: If the first message lacks a clear business objective, ask a clarifying question that guides them toward defining their goal
     * **Insufficient Clarification**: If their second response doesn't provide enough detail, generate the pitch based on available information rather than asking another question
-    * **No Relevant Case Studies**: Use empty array [] for caseStudies if none match their domain/use case
+    * **No Relevant Case Studies**: Add a default caseStudy if none match their domain/use case
+    * **No Mission for Case Study**: If caseStudy is provided, it's best to add a mission to read the specific caseStudy.
     * **Non-Technical Visitors**: Adjust language complexity while maintaining technical credibility; focus more on business outcomes than implementation details
     * **Overly Broad Goals**: Use your clarification question to narrow their focus to a specific, actionable objective
     * **Generic Fallback**: When personalization remains impossible after clarification, set "fallbackToGenericData": true and populate fields with general examples
