@@ -62,7 +62,6 @@ async def parse_user_goal(user_prompt: str, session_id: str) -> dict:
             await history.aadd_messages(messages=[SystemMessage(content=template_prompt), HumanMessage(content=user_prompt), AIMessage(content=response_content)])
             logger.debug(f"Response content: {response_content}")
             messages = await history.aget_messages()
-            print(messages)
             return response_content
         except json.JSONDecodeError as je:
             logger.error(f"Failed to parse JSON response: {je}")
