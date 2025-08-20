@@ -1,18 +1,21 @@
 """JWT utilities for token generation and validation."""
 
+from datetime import datetime, timedelta, timezone
 from typing import Optional
+
+import traceback
 import uuid
 import jwt
-from datetime import datetime, timedelta, timezone
 from httpx import Request
 
 from fastapi import Request, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 
 from src.database import get_connection
+from src.utils.errors import raise_http_error
 
-from ..models.auth import TokenPayload
 from src.config import JWT_SECRET_KEY, JWT_ALGORITHM, TOKEN_EXPIRY_SECONDS
+from ..models.auth import TokenPayload
 
 # OAuth2 scheme for token authentication
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
@@ -49,6 +52,26 @@ class JWTManager:
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Failed to create session: {str(e)}"
             )
+
+    async def store_session_transfer(self, conn, old_session_id, new_session_id):
+        """
+        Store Reset Transfer from old Session to new in db
+        """
+        try:
+            await conn.execute(
+                """
+                INSERT INTO session_transfers (old_session_id, new_session_id)
+                VALUES (%s, %s)
+                """,
+                (old_session_id, new_session_id)
+            )
+
+            await conn.commit()
+        
+        except Exception as e:
+            await conn.rollback()
+            print(f"ERROR: {e}", traceback.format_exc())
+            raise_http_error(500, "Error during storing reset data")
     
     
     async def create_access_token(self, session_id: str) -> str:
