@@ -289,3 +289,48 @@ async def revoke_session(
             return RevokeResponse(revoked=True)
     except Exception as e:
         raise_http_error(500, "Revocation failed")
+
+
+
+
+@router.post("/reset", response_model=SessionResponse)
+async def reset_session(
+    request: Request,
+    old_session_id: str = Depends(get_current_session)
+):
+    """
+    Reset session and link old session to new session
+
+    Description:
+
+    """
+
+
+    try:
+        async with get_connection() as conn:
+            # Generate new session id  and jwt tokens
+            new_session_id = await jwt_manager.generate_session_id(conn, request)
+
+            new_access_token = await jwt_manager.create_access_token(new_session_id)
+
+            new_refresh_token = await jwt_manager.create_refresh_token(new_session_id)
+
+            await session_manager.create_session(new_session_id)
+
+            await jwt_manager.store_session_transfer(
+                conn, 
+                old_session_id=old_session_id, 
+                new_session_id=new_session_id
+            )
+
+            return SessionResponse(
+                access_token=new_access_token,
+                expires_in=jwt_manager.expiry_seconds,
+                refresh_token=new_refresh_token,
+                refresh_expires_in=jwt_manager.expiry_seconds
+            )
+    except Exception as e:
+        print("JWT Exception: {e}", traceback.format_exc())
+        raise_http_error(500, "JWT generation failed")
+
+
