@@ -67,6 +67,17 @@ class Process(BaseModel):
     description: str
 
 
+class MissionInput(BaseModel):
+    """Model for the input dict in mission"""
+    required: bool
+    type: str
+    placeholder: str
+
+class MissionOptions(BaseModel):
+    """Model for the mission options"""
+    targetCaseStudyId: str
+
+
 class ClarifyMission(BaseModel):
     """Mission model for Clarify Response."""
     id: str
@@ -74,6 +85,10 @@ class ClarifyMission(BaseModel):
     description: str
     points: int
     status: str = "pending"  # pending, completed, cancelled
+    icon: str
+    input: MissionInput
+    missionType: str
+    options: MissionOptions
     # Optional artifact payload for completed missions (e.g. user's answer)
     artifact: Optional[Dict[str, Any]] = None
 

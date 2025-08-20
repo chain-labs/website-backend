@@ -130,6 +130,7 @@ template_prompt = """
     * **Unclear Initial Goal**: If the first message lacks a clear business objective, ask a clarifying question that guides them toward defining their goal
     * **Insufficient Clarification**: If their second response doesn't provide enough detail, generate the pitch based on available information rather than asking another question
     * **No Relevant Case Studies**: Add a default caseStudy if none match their domain/use case
+    * **Insufficient Points**: The cumulative points of all the missions **SHOULD ALWAYS BE MORE THAN** 50 so that call can be unlocked.
     * **No Mission for Case Study**: If caseStudy is provided, it's best to add a mission to read the specific caseStudy.
     * **Non-Technical Visitors**: Adjust language complexity while maintaining technical credibility; focus more on business outcomes than implementation details
     * **Overly Broad Goals**: Use your clarification question to narrow their focus to a specific, actionable objective

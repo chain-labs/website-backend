@@ -261,14 +261,35 @@ async def clarify_goal(
                 validated_missions = []
                 for mission in response_data["missions"]:
                     validated_mission = {
-                        "id": mission.get("id", ""),
+                        "id": mission.get("id", "default_mission"),
                         "title": mission.get("title", mission.get("name", "Untitled Mission")),
-                        "description": mission.get("description", mission.get("desc", "Mission description")),
+                        "description": mission.get(
+                            "description", 
+                            mission.get("desc", "Mission description")
+                        ),
                         "points": mission.get("points", mission.get("base_points", 10)),
+                        "icon": mission.get(
+                            "icon", 
+                            mission.get("icons", "https://lucide.dev/icons/briefcase")
+                        ),
+                        "input": mission.get(
+                            "input", 
+                            {"required": False, "type": "N/A", "placeholder": "N/A" }
+                        ),
+                        "missionType": mission.get(
+                            "missionType", 
+                            mission.get("mission-type", "default")
+                        ), 
+                        "options": mission.get(
+                            "options", {
+                                "targetCaseStudyId": 'N/A'
+                            }
+                        ),
                         "status": mission.get("status", "pending")
                     }
                     validated_missions.append(validated_mission)
                 response_data["missions"] = validated_missions
+
 
             # Ensure required fields exist
             if "fallbackToGenericData" not in response_data:
@@ -287,8 +308,11 @@ async def clarify_goal(
                                 "description": m["description"],
                                 "points": m["points"],
                                 "status": m.get("status", "pending"),
+                                "icon": m["icon"],
+                                "input": m["input"],
+                                "missionType": m["missionType"],
+                                "options": m["options"]
                             })
-
                 await session_manager.upsert_session_progress(
                     session_id,
                     {
@@ -427,7 +451,11 @@ async def get_personalized_content(session_id: str = Depends(get_current_session
                             "title": m["title"],
                             "description": m["description"],
                             "points": m["points"],
-                            "status": m.get("status", "pending"),  # Include completion status
+                            "status": m.get("status", "pending"),
+                            "icon": m["icon"],
+                            "input": m["input"],
+                            "missionType": m["missionType"],
+                            "options": m["options"]
                         }
                         # If artifact is present (e.g., from mission completion), propagate it
                         if isinstance(m.get("artifact"), dict):
