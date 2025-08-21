@@ -4,6 +4,8 @@ import traceback
 from fastapi import APIRouter, Depends
 
 from ..models.mission import (
+    LinkCallRequest,
+    LinkCallResponse,
     ProgressResponse,
     CompleteMissionRequest,
     CompleteMissionResponse,
@@ -15,154 +17,6 @@ from ..services.mock_data import mock_data_service
 from ..utils.errors import raise_http_error
 
 router = APIRouter(prefix="/api", tags=["Missions & Progress"])
-
-
-@router.get("/progress", response_model=ProgressResponse)
-async def get_progress(session_id: str = Depends(get_current_session)):
-    """
-    Get current mission progress, points, and unlock status.
-    
-    **Description:**
-    Retrieves the complete progress overview for your session, including 
-    individual mission statuses (pending/completed), total points earned, 
-    and whether special features like the free call are unlocked.
-    
-    **When to use:**
-    - To display a progress dashboard or overview
-    - After completing missions to see updated totals
-    - To check current unlock status
-    - For progress tracking and gamification UI
-    - When resuming a session to see where you left off
-    
-    **Authentication Required:**
-    Requires a valid Bearer token in the Authorization header.
-    
-    **Request Headers:**
-    ```
-    Authorization: Bearer <access_token>
-    ```
-    
-    **No Request Body Required:**
-    This is a GET request - no request body needed.
-    
-    
-    **Response Example:**
-    ```json
-    {
-        "points_total": 45,
-        "missions": [
-            {
-                "id": "defineMetrics",
-                "status": "completed",
-                "points": 15
-            },
-            {
-                "id": "sketchFlow", 
-                "status": "completed",
-                "points": 15
-            },
-            {
-                "id": "buildPrototype",
-                "status": "pending",
-                "points": 25
-            },
-            {
-                "id": "runDemo",
-                "status": "pending", 
-                "points": 20
-            }
-        ],
-        "call_unlocked": true
-    }
-    ```
-    
-    **Usage Example:**
-    ```javascript
-    const accessToken = localStorage.getItem('access_token');
-    
-    const response = await fetch('/api/progress', {
-        method: 'GET',
-        headers: {
-            'Authorization': `Bearer ${accessToken}`
-        }
-    });
-    
-    const progress = await response.json();
-    
-    // Update progress UI
-    document.getElementById('total-points').textContent = progress.points_total;
-    document.getElementById('unlock-status').textContent = 
-        progress.call_unlocked ? 'Call Unlocked!' : 'Complete more missions to unlock call';
-    
-    // Show mission progress
-    const completedCount = progress.missions.filter(m => m.status === 'completed').length;
-    const totalCount = progress.missions.length;
-    document.getElementById('progress-bar').style.width = 
-        `${(completedCount / totalCount) * 100}%`;
-    ```
-    
-    **Error Cases:**
-    - **401 Unauthorized**: Missing or invalid Authorization header
-    - **404 Not Found**: Session not found (invalid session ID in token)
-    - **500 Internal Server Error**: Progress calculation failed
-    
-    **Response Fields:**
-    - **points_total**: Total points earned across all completed missions
-    - **missions**: Array of all missions with current status and point values
-    - **call_unlocked**: Boolean indicating if free call feature is available
-    
-    **Mission Status Values:**
-    - **"pending"**: Mission is available but not yet completed
-    - **"completed"**: Mission has been finished and points awarded
-    
-    **Unlock Logic:**
-    - Call feature unlocks after completing 2 or more missions
-    - Points accumulate with each completed mission
-    - Unlock status persists throughout the session
-    
-    **Integration Notes:**
-    - Use this endpoint to build progress dashboards
-    - Combine with `/api/mission/complete` for mission completion flow
-    - Check unlock status before showing premium features
-    - Cache progress data and refresh after mission completions
-    """
-    try:
-        # First try to get progress from database
-        progress = await session_manager.get_session_progress(session_id)
-        
-        if progress and progress.get("missions"):
-            # Convert stored missions to MissionStatus format
-            missions = progress.get("missions", [])
-            mission_statuses = []
-            
-            for mission in missions:
-                mission_statuses.append({
-                    "id": mission.get("id"),
-                    "status": mission.get("status", "pending"),
-                    "points": mission.get("points", 0)
-                })
-            
-            return ProgressResponse(
-                points_total=progress.get("points_total", 0),
-                missions=mission_statuses,
-                call_unlocked=progress.get("call_unlocked", False)
-            )
-        
-        # Fallback to in-memory session data
-        session_data = await session_manager.get_session(session_id)
-        if not session_data:
-            raise_http_error(404, "Session not found")
-        
-        mission_statuses = session_data.get_mission_statuses()
-        
-        return ProgressResponse(
-            points_total=session_data.points_total,
-            missions=mission_statuses,
-            call_unlocked=session_data.is_call_unlocked()
-        )
-        
-    except Exception as e:
-        raise_http_error(500, "Scoring engine error")
 
 
 @router.post("/mission/complete", response_model=CompleteMissionResponse)
@@ -531,3 +385,54 @@ async def check_unlock_status(session_id: str = Depends(get_current_session)):
     except Exception as e:
         print(f"Error in check_unlock_status: {e}", traceback.format_exc())
         raise_http_error(500, "Failed to check unlock status")
+
+
+@router.post("/call/link", response_model=LinkCallResponse)
+async def book_call(
+    request: LinkCallRequest,
+    session_id: str = Depends(get_current_session)
+):
+    """
+    Book a call and store the call record for the current session.
+
+    **Use Case:**
+    - This endpoint is called when a user books a call (e.g., after unlocking the call feature).
+    - It records the call booking (with `id` and `uid`) in the session's progress for auditing and tracking.
+    - The call record is persisted in the database and can be retrieved later for session history or analytics.
+
+    **Request Body:**
+    - `id`: The unique identifier for the booked call (required).
+    - `uid`: The unique user identifier for the call (required).
+
+    **Response:**
+    - `status`: Boolean indicating if the call record was stored successfully.
+    - `messages`: Success or error message.
+
+    **Errors:**
+    - Returns 400 if `id` or `uid` is missing.
+    - Returns 500 if storing the call record fails.
+
+    **Typical Flow:**
+    1. User completes enough missions to unlock the call feature.
+    2. User books a call via the UI, which triggers this endpoint.
+    3. The call record is saved to the session's progress in the database.
+    4. The response confirms success or provides an error message.
+    """
+
+    if not request.id:
+        raise_http_error(400, "Id is required")
+
+    if not request.uid:
+        raise_http_error(400, "UId is required")
+
+    try:
+        await session_manager.store_call_record(session_id, request.uid, request.id)
+
+        return LinkCallResponse(
+            status=True,
+            messages="Call Record Stored Succesfully"
+        )
+    except Exception as e:
+        print(f"ERROR: {e}", traceback.format_exc())
+        raise_http_error(500, "Failed to save call data. Try Again!")
+        

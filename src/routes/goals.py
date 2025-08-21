@@ -474,7 +474,8 @@ async def get_personalized_content(session_id: str = Depends(get_current_session
                 why=progress.get("why", "") or "",
                 fallbackToGenericData=False,
                 points_total=progress.get("points_total", 0) or 0,
-                call_unlocked=progress.get("call_unlocked", False) or False
+                call_unlocked=progress.get("call_unlocked", False) or False,
+                call_record=progress.get("call_record", []) or []
             )
 
             print("Sending Response from db storage")
@@ -522,6 +523,9 @@ async def get_personalized_content(session_id: str = Depends(get_current_session
                         response_data["points_total"] = 0
                     if "call_unlocked" not in response_data:
                         response_data["call_unlocked"] = False
+                    
+                    if "call_record" not in response_data:
+                        response_data["call_record"] = []
 
                     # Create PersonalisedData object
                     personalised_data = PersonalisedData(**response_data)
@@ -538,7 +542,8 @@ async def get_personalized_content(session_id: str = Depends(get_current_session
                         why="",
                         fallbackToGenericData=True,
                         points_total=0,
-                        call_unlocked=False
+                        call_unlocked=False,
+                        call_record=[]
                     )
                 
                 # For CLARIFIED status, we return structured data, so messages can be empty
@@ -558,6 +563,7 @@ async def get_personalized_content(session_id: str = Depends(get_current_session
                     why="",
                     points_total=0,
                     call_unlocked=False,
+                    call_record=[],
                     fallbackToGenericData=True
                 )
         else:
@@ -574,6 +580,7 @@ async def get_personalized_content(session_id: str = Depends(get_current_session
                 why="",
                 points_total=0,
                 call_unlocked=False,
+                call_record=[],
                 fallbackToGenericData=True
             )
 

@@ -5,6 +5,7 @@ from langchain_core.messages import BaseMessage
 from pydantic import BaseModel
 from datetime import datetime
 
+
 class Mission(BaseModel):
     """Mission model."""
     id: str
@@ -104,6 +105,11 @@ class ClarifyResponse(BaseModel):
     why: str
     fallbackToGenericData: bool
 
+class CallRecord(BaseModel):
+    """Model to store Call Record"""
+    id: str
+    uid: str
+
 class PersonalisedData(BaseModel):
     """Response model for personalised data"""
     hero: Hero
@@ -116,6 +122,7 @@ class PersonalisedData(BaseModel):
     fallbackToGenericData: bool
     points_total: int
     call_unlocked: bool
+    call_record: List[CallRecord]
 
 class PersonalisedResponse(BaseModel):
     """Response model for personalised data"""

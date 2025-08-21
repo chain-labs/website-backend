@@ -33,6 +33,7 @@ class SessionProgress(TypedDict):
     call_unlocked: NotRequired[bool]
     created_at: NotRequired[datetime]
     updated_at: NotRequired[datetime]
+    call_record: NotRequired[List[Dict[str, str]]]
 
 class SessionTransfer(TypedDict):
     """Model storing transfer links when a user resets a session."""
