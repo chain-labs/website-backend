@@ -3,7 +3,7 @@
 from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 
-from .goal import Mission
+from src.models.goal import Mission
 
 
 class MissionStatus(BaseModel):
@@ -43,3 +43,13 @@ class CompleteMissionResponse(BaseModel):
 class UnlockStatusResponse(BaseModel):
     """Response for unlock status check."""
     call_unlocked: bool
+
+class LinkCallRequest(BaseModel):
+    """Request model to link booked call data with session_id"""
+    id: str
+    uid: str
+
+class LinkCallResponse(BaseModel):
+    """Response model to return data after linking booked call data with session_id"""
+    status: bool
+    messages: str

@@ -11,6 +11,8 @@ import traceback
 from psycopg.types.json import Json
 from datetime import datetime, timezone
 
+from src.utils.errors import raise_http_error
+
 from ..models.goal import Goal, Mission, CaseStudy
 from ..models.mission import MissionStatus
 from ..models.chat import ChatMessage
@@ -108,7 +110,7 @@ class SessionManager:
         
         query = """
             SELECT session_id, goal, hero, process, missions, case_studies, 
-                points_total, call_unlocked, why_this_case_studies_were_selected, why, created_at, updated_at
+                points_total, call_unlocked, call_record, why_this_case_studies_were_selected, why, created_at, updated_at
             FROM session_progress
             WHERE session_id = %s
         """
@@ -138,6 +140,7 @@ class SessionManager:
                     "call_unlocked": row.get("call_unlocked"),
                     "created_at": row.get("created_at"),
                     "updated_at": row.get("updated_at"),
+                    "call_record": row.get("call_record", []),
                 }
                 return cast(SessionProgress, progress)
 
@@ -265,9 +268,9 @@ class SessionManager:
         query = """
             INSERT INTO session_progress (
                 session_id, goal, hero, process, missions, case_studies,
-                why_this_case_studies_were_selected, why, points_total, call_unlocked
+                why_this_case_studies_were_selected, why, points_total, call_unlocked, call_record
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (session_id)
             DO UPDATE SET
                 goal = EXCLUDED.goal,
@@ -279,6 +282,7 @@ class SessionManager:
                 why = EXCLUDED.why,
                 points_total = EXCLUDED.points_total,
                 call_unlocked = EXCLUDED.call_unlocked,
+                call_record = EXCLUDED.call_record,
                 updated_at = NOW()
         """
         values = (
@@ -292,6 +296,7 @@ class SessionManager:
             payload.get("why"),
             payload.get("points_total"),
             payload.get("call_unlocked"),
+            Json(payload.get("call_record", []))
         )
         try:
             async with transaction() as conn:
@@ -310,8 +315,7 @@ class SessionManager:
             # First, get the current progress
             current_progress = await self.get_session_progress(session_id)
             if not current_progress:
-                print(f"WARNING: No progress found for session {session_id}")
-                return
+                raise ValueError(f"No progress found for session {session_id}")
             
             # Update the specific mission status
             missions = current_progress.get("missions", [])
@@ -348,6 +352,36 @@ class SessionManager:
             traceback.print_exc()
             raise
 
+    async def store_call_record(self, session_id: str, uid: str, id: str):
+        """Add booked call record to the session data"""
+
+        try:
+            current_progress = await self.get_session_progress(session_id)
+            print(f"Current: {current_progress}")
+
+            if not current_progress:
+                raise ValueError(f"No progress found for session {session_id}")
+
+            updated_progress = current_progress.copy()
+            current_call_record = current_progress.get("call_record", [])
+
+            current_call_record.append({
+                "id": id,
+                "uid": uid
+            })
+
+            updated_progress["call_record"] = current_call_record
+
+            await self.upsert_session_progress(session_id, updated_progress)
+
+        except ValueError as e:
+            print(f"Error: {e}", traceback.format_exc())
+            raise_http_error(400, "No progress found for current session")
+        except Exception as e:
+            print(f"Error: {e}", traceback.format_exc())
+            raise_http_error(500, "Something went wrong while storing call_record")
+
+
     def _normalize_progress(self, progress: SessionProgress) -> Dict[str, Any]:
         """Convert `SessionProgress` to a plain JSON-serializable dict.
 
@@ -366,6 +400,7 @@ class SessionManager:
             return value
 
         return cast(Dict[str, Any], to_plain(progress))
+
 
 
 # Global session manager instance

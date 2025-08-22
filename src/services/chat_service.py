@@ -1,6 +1,5 @@
 """Chat service for the chat endpoint"""
 
-import json
 import traceback
 from typing import List
 from langchain.prompts import ChatPromptTemplate
@@ -50,10 +49,6 @@ class ChatService:
             return response
         except Exception as e:
             print(f"LLM Parse Error: {e}", traceback.format_exc())
-
-
-
-        
 
 
     async def ask(self, *, session_id: str, message: str, page: str, section: str):

@@ -36,7 +36,8 @@ CREATE TABLE IF NOT EXISTS session_progress (
     points_total INTEGER NULL,
     call_unlocked BOOLEAN NULL,
     created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW()
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    call_record JSONB NULL
 );
 """
 
