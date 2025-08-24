@@ -27,7 +27,11 @@ def create_app() -> FastAPI:
     # Add CORS middleware
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],  # In production, specify actual origins
+        allow_origin_regex=(
+            r"^http://(localhost|127\.0\.0\.1)(:\d+)?$"
+            r"|^https://([a-z0-9-]+\.)+vercel\.app$"
+            r"|^https://(www\.)?chainlabs\.in$"
+        ),
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
