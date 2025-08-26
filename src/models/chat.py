@@ -40,7 +40,7 @@ class ChatProgress(BaseModel):
 class ChatNavigation(BaseModel):
     """Navigation instruction for the frontend."""
     page: str = Field(..., description="Target page to navigate to")
-    section: str = Field(..., description="Specific section on that page")
+    sectionId: str = Field(..., description="Specific section on that page")
     metadata: Optional[Dict[str, Any]] = Field(None, description="Navigation parameters")
 
 
@@ -52,4 +52,5 @@ class ChatResponse(BaseModel):
     updatedProgress: Optional[ChatProgress] = Field(None, description="Progress snapshot for UI sync")
     suggestedRead: Optional[List[str]] = Field(None, description="Recommended case studies")
     navigate: Optional[ChatNavigation] = Field(None, description="Frontend navigation instruction")
+    
     

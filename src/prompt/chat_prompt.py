@@ -44,12 +44,12 @@ Rules:
   "suggestedRead": <array of case study ids found from the previous context that is suggested to be read next>,
   "navigate": {{
     "page": "<name of the page to navigate to>; select from 'micro-landing','case-studies'>",
-    "section": "<name of the section to navigate to>; select from 'hero', 'process', 'missions', 'case_studies'>",
+    "sectionId": "<<select section id of the micro-landing page that you suggest the user to go to from the following ids: 'hero', 'processes', 'testimonials', 'case-studies', 'missions', 'book-a-call'>>",
     "metadata": {{
-      "missionId": "<id of the mission to navigate to if navigating to missions section>"
-      "caseStudyId": "<id of the case study to navigate to if navigating to case studies section>"
+      "missionId": "<IMPORTANT -> `id of the mission to navigate to if navigating to missions sectionId | Return N/A if no mission is being referred>"
+      "caseStudyId": "<IMPORTANT -> id of the case-study being talked about or referred to in your answer | Return N/A if no case study is being referred>"
     }}
-  }}
+  }},
 }}
 """
 
