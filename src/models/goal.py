@@ -126,6 +126,7 @@ class PersonalisedData(BaseModel):
 
 class PersonalisedResponse(BaseModel):
     """Response model for personalised data"""
+    sid: str
     status: str
     messages: List[BaseMessage]
     personalisation: PersonalisedData

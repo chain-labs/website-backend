@@ -4,6 +4,7 @@ import json
 import traceback
 from fastapi import APIRouter, Depends
 from datetime import datetime
+from src.services.default_services import add_default_missions
 from src.services.llm_services import get_history
 
 from ..models.goal import (
@@ -255,10 +256,12 @@ async def clarify_goal(
                 response_data["caseStudies"] = case_studies
             else:
                 response_data["caseStudies"] = []
+            
+            points_total = 0
 
             # Validate and fix mission data to ensure required fields
             if response_data.get("missions"):
-                validated_missions = []
+                validated_missions = add_default_missions([])
                 for mission in response_data["missions"]:
                     validated_mission = {
                         "id": mission.get("id", "default_mission"),
@@ -288,6 +291,11 @@ async def clarify_goal(
                         "status": mission.get("status", "pending")
                     }
                     validated_missions.append(validated_mission)
+                points_total = sum(
+                    m.get("points", 0)
+                    for m in validated_missions
+                    if m.get("status") == "completed"
+                )
                 response_data["missions"] = validated_missions
 
 
@@ -324,7 +332,7 @@ async def clarify_goal(
                         "case_studies": case_ids_for_storage,
                         "why_this_case_studies_were_selected": response_data.get("whyThisCaseStudiesWereSelected", ""),
                         "why": response_data.get("why", ""),
-                        "points_total": 0,
+                        "points_total": points_total,
                         "call_unlocked": False,
                     }
                 )
@@ -431,7 +439,10 @@ async def get_personalized_content(session_id: str = Depends(get_current_session
     - `500 Internal Server Error`: Unexpected error during personalization retrieval.
     """
 
+
+
     try:
+        sid = (session_id[:4] + "-" + session_id[-4:]) if session_id and len(session_id) >= 8 else session_id
         # 1) Try to serve from persisted SessionProgress first
         progress = await session_manager.get_session_progress(session_id)
         if progress is not None:
@@ -481,6 +492,7 @@ async def get_personalized_content(session_id: str = Depends(get_current_session
             print("Sending Response from db storage")
 
             return PersonalisedResponse(
+                sid=sid,
                 status="CLARIFIED",
                 messages=[],
                 personalisation=personalised_data
@@ -590,6 +602,7 @@ async def get_personalized_content(session_id: str = Depends(get_current_session
             raise_http_error(500, "Failed to generate personalization data")
 
         return PersonalisedResponse(
+            sid=sid,
             status=status,
             messages=messages,
             personalisation=personalised_data
