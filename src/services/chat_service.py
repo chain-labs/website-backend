@@ -118,6 +118,10 @@ class ChatService:
                         message_history.append(AIMessage(content=reply))
                 if m.type == "human":
                     message_history.append(HumanMessage(content=m.content))
+            
+            navigate = json_response.get("navigate", {})
+
+            # print(f"navigate: {navigate}")
 
             return ChatResponse(
                 reply=json_response.get("reply"),
@@ -129,7 +133,7 @@ class ChatService:
                 },
                 followUpMissions=json_response.get("followUpMissions"),
                 suggestedRead=[],
-                navigate=json_response.get("navigate")
+                navigate=navigate,
             )
         except Exception as e:
             print(f"LLM Parse Error: {e}", traceback.format_exc())
