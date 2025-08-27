@@ -4,7 +4,7 @@ import json
 import traceback
 from fastapi import APIRouter, Depends
 from datetime import datetime
-from src.services.default_services import add_default_missions
+from src.services.default_services import DEFAULT_HERO, DEFAULT_PROCESS, add_default_missions, get_default_case_studies
 from src.services.llm_services import get_history
 
 from ..models.goal import (
@@ -545,10 +545,13 @@ async def get_personalized_content(session_id: str = Depends(get_current_session
                     print(f"JSON extraction/decoding failed: {e}")
                     # Fallback to generic data if JSON parsing fails
                     personalised_data = PersonalisedData(
-                        hero={"title": "Personalized Solution", "description": "Custom solution for your needs"},
-                        process=[],
+                        hero={
+                            "title": DEFAULT_HERO.get("title", ""),
+                            "description": DEFAULT_HERO.get("description", ""),
+                        },
+                        process=DEFAULT_PROCESS,
                         goal="Custom solution",
-                        caseStudies=[],
+                        caseStudies=get_default_case_studies(),
                         whyThisCaseStudiesWereSelected="",
                         missions=[],
                         why="",
@@ -566,8 +569,11 @@ async def get_personalized_content(session_id: str = Depends(get_current_session
                 messages = messages_list[1:] if len(messages_list) > 1 else []
                 # For GOAL_SET status, we don't have structured data yet
                 personalised_data = PersonalisedData(
-                    hero={"title": "Goal Set", "description": "Your goal has been submitted and is being processed"},
-                    process=[],
+                    hero={
+                        "title": DEFAULT_HERO.get("title", ""),
+                        "description": DEFAULT_HERO.get("description", ""),
+                    },
+                    process=DEFAULT_PROCESS,
                     goal="Goal submitted",
                     caseStudies=[],
                     whyThisCaseStudiesWereSelected="",
@@ -583,10 +589,13 @@ async def get_personalized_content(session_id: str = Depends(get_current_session
             status = "INITIAL"
             messages = messages_list if messages_list else []
             personalised_data = PersonalisedData(
-                hero={"title": "Welcome to Chain Labs", "description": "Let's get started with your AI project"},
-                process=[],
+                hero={
+                    "title": DEFAULT_HERO.get("title", ""),
+                    "description": DEFAULT_HERO.get("description", ""),
+                },
+                process=DEFAULT_PROCESS,
                 goal="No goal submitted yet",
-                caseStudies=[],
+                caseStudies=get_default_case_studies(),
                 whyThisCaseStudiesWereSelected="",
                 missions=[],
                 why="",

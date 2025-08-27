@@ -1,5 +1,8 @@
 """Services that corresponds to default values"""
 
+from src.services import cms
+
+
 DEFAULT_MISSIONS = [
     {
         "id": "input_mission_goal",
@@ -54,6 +57,53 @@ DEFAULT_MISSIONS = [
     },
     
 ]
+
+
+DEFAULT_HERO = {
+    "title": "Build trusted AI-powered solutions with Chain Labs",
+    "description": "We help you define, prototype, and deliver secure digital systems"
+  }
+
+DEFAULT_PROCESS = [
+    {
+        "name": "Problem Framing (Understand Why)", 
+        "description": "We collaborate with you to identify general business pain points and outline how technology can add measurable efficiency and trust." 
+    },
+    { 
+        "name": "Discovery", 
+        "description": "We explore potential technical requirements broadly, ensuring flexibility whether you need blockchain, AI, or secure data infrastructure." 
+    },
+    { 
+        "name": "Solution Prototyping", 
+        "description": "We provide quick proofs of concept tailored to common enterprise needs, helping you validate potential before full investment." 
+    },
+    { 
+        "name": "Agile Development and Pilot", 
+        "description": "We iteratively design, develop, and test your solution, refining based on feedback to ensure practical deployment readiness." 
+    },
+    { 
+        "name": "Delivery", 
+        "description": "We manage the final deployment and handoff smoothly, providing support and documentation for a reliable long-term system." 
+    }
+  ],
+
+
+def get_default_case_studies() -> list:
+    """
+    Returns a list of default case studies.
+
+    This function retrieves the default set of case studies by their IDs.
+    It is typically used to provide example or fallback case studies when
+    personalized or user-specific case studies are not available.
+
+    Returns:
+        list: A list of case study dictionaries.
+    """
+    case_study_ids = ["case-1", "case-2", "case-3"]
+    case_studies = cms.get_case_studies_by_ids(case_study_ids)
+
+    return case_studies
+
 
 def add_default_missions(missions_list: list) -> list:
     """
