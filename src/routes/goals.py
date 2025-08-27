@@ -4,7 +4,7 @@ import json
 import traceback
 from fastapi import APIRouter, Depends
 from datetime import datetime
-from src.services.default_services import DEFAULT_HERO, DEFAULT_PROCESS, add_default_missions, get_default_case_studies
+from src.services.default_services import DEFAULT_HERO, DEFAULT_PROCESS, add_default_missions, get_default_case_studies, normalize_process_list
 from src.services.llm_services import get_history
 
 from ..models.goal import (
@@ -14,6 +14,7 @@ from ..models.goal import (
     ClarifyResponse,
     PersonalisedData,
     PersonalisedResponse,
+    Process,
 )
 from ..auth.middleware import get_current_session
 from ..services.session_manager import session_manager
@@ -543,13 +544,14 @@ async def get_personalized_content(session_id: str = Depends(get_current_session
                     personalised_data = PersonalisedData(**response_data)
                 except (ValueError, json.JSONDecodeError) as e:
                     print(f"JSON extraction/decoding failed: {e}")
+                    process = DEFAULT_PROCESS
                     # Fallback to generic data if JSON parsing fails
                     personalised_data = PersonalisedData(
                         hero={
                             "title": DEFAULT_HERO.get("title", ""),
                             "description": DEFAULT_HERO.get("description", ""),
                         },
-                        process=DEFAULT_PROCESS,
+                        process=process,
                         goal="Custom solution",
                         caseStudies=get_default_case_studies(),
                         whyThisCaseStudiesWereSelected="",
@@ -567,13 +569,14 @@ async def get_personalized_content(session_id: str = Depends(get_current_session
                 status = "GOAL_SET"
                 # Remove system message and return user messages
                 messages = messages_list[1:] if len(messages_list) > 1 else []
+                process = DEFAULT_PROCESS
                 # For GOAL_SET status, we don't have structured data yet
                 personalised_data = PersonalisedData(
                     hero={
                         "title": DEFAULT_HERO.get("title", ""),
                         "description": DEFAULT_HERO.get("description", ""),
                     },
-                    process=DEFAULT_PROCESS,
+                    process=process,
                     goal="Goal submitted",
                     caseStudies=[],
                     whyThisCaseStudiesWereSelected="",
@@ -587,15 +590,17 @@ async def get_personalized_content(session_id: str = Depends(get_current_session
         else:
             # INITIAL status: User has just started, return basic data
             status = "INITIAL"
+            process = DEFAULT_PROCESS
+            case_studies = await get_default_case_studies()
             messages = messages_list if messages_list else []
             personalised_data = PersonalisedData(
                 hero={
                     "title": DEFAULT_HERO.get("title", ""),
                     "description": DEFAULT_HERO.get("description", ""),
                 },
-                process=DEFAULT_PROCESS,
+                process=process,
                 goal="No goal submitted yet",
-                caseStudies=get_default_case_studies(),
+                caseStudies=case_studies,
                 whyThisCaseStudiesWereSelected="",
                 missions=[],
                 why="",
