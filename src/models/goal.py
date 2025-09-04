@@ -22,6 +22,7 @@ class CaseStudy(BaseModel):
     description: str
     shortDescription: str
     thumbnail: str
+    fallbackImage: str
 
 
 class Goal(BaseModel):

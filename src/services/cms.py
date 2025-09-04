@@ -68,6 +68,12 @@ async def _ensure_connected() -> None:
 
 
 # ------------------------------------------------------------------------------
+# Constants
+# ------------------------------------------------------------------------------
+
+DEFAULT_FALLBACK_IMAGE = "https://images.unsplash.com/photo-1752578753798-ff3a23e16498?q=80&w=2070&auto=format&fit=crop&ixlib=rb-4.1.0&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D"
+
+# ------------------------------------------------------------------------------
 # Public API (async, pure functions)
 # ------------------------------------------------------------------------------
 
@@ -84,7 +90,13 @@ async def get_all_case_studies(*, simulate_latency_ms: int = 0) -> List[Dict[str
     await _ensure_connected()
     if simulate_latency_ms:
         await asyncio.sleep(simulate_latency_ms / 1000)
-    return [copy.deepcopy(v) for v in _CASE_STUDIES.values()]
+    case_studies = [copy.deepcopy(v) for v in _CASE_STUDIES.values()]
+    
+    # Add fallback image to each case study
+    for case_study in case_studies:
+        case_study["fallbackImage"] = DEFAULT_FALLBACK_IMAGE
+    
+    return case_studies
 
 
 async def get_case_study_by_id(case_id: str, *, simulate_latency_ms: int = 0) -> Optional[Dict[str, Any]]:
@@ -102,7 +114,11 @@ async def get_case_study_by_id(case_id: str, *, simulate_latency_ms: int = 0) ->
     if simulate_latency_ms:
         await asyncio.sleep(simulate_latency_ms / 1000)
     data = _CASE_STUDIES.get(case_id)
-    return copy.deepcopy(data) if data is not None else None
+    if data is not None:
+        case_study = copy.deepcopy(data)
+        case_study["fallbackImage"] = DEFAULT_FALLBACK_IMAGE
+        return case_study
+    return None
 
 
 async def get_case_studies_by_ids(
@@ -136,7 +152,9 @@ async def get_case_studies_by_ids(
                 continue
             item = _CASE_STUDIES.get(cid)
             if item is not None:
-                results.append(copy.deepcopy(item))
+                case_study = copy.deepcopy(item)
+                case_study["fallbackImage"] = DEFAULT_FALLBACK_IMAGE
+                results.append(case_study)
                 seen.add(cid)
         return results
     else:
@@ -148,6 +166,8 @@ async def get_case_studies_by_ids(
                 continue
             item = _CASE_STUDIES.get(cid)
             if item is not None:
-                out.append(copy.deepcopy(item))
+                case_study = copy.deepcopy(item)
+                case_study["fallbackImage"] = DEFAULT_FALLBACK_IMAGE
+                out.append(case_study)
                 seen.add(cid)
         return out
