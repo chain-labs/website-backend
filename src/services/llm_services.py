@@ -15,7 +15,7 @@ from src.database import DATABASE_URL
 
 
 # if "RAILWAY_DEPLOYMENT_ID" in os.environ:
-llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.7, api_key=OPENAI_API_KEY)
+llm = ChatOpenAI(model="gpt-5-nano", temperature=0.7, api_key=OPENAI_API_KEY)
 # else:
     # llm = ChatOllama(model="llama3", temperature=0.7)
 

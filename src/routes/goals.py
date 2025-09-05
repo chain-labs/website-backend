@@ -487,7 +487,7 @@ async def get_personalized_content(session_id: str = Depends(get_current_session
                 fallbackToGenericData=False,
                 points_total=progress.get("points_total", 0) or 0,
                 call_unlocked=progress.get("call_unlocked", False) or False,
-                call_record=progress.get("call_record", []) or []
+                call_record=progress.get("call_record", [])[-1:] or []
             )
 
             print("Sending Response from db storage")
