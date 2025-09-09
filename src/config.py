@@ -13,3 +13,6 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 JWT_ALGORITHM = "HS256"
 TOKEN_EXPIRY_SECONDS = 31536000 # 1 year
+
+# Default case study fallback used in clarify flow when LLM suggests none
+DEFAULT_CASE_STUDY_ID = os.getenv("DEFAULT_CASE_STUDY_ID", "case-1")

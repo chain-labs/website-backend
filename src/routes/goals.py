@@ -5,6 +5,7 @@ import traceback
 from fastapi import APIRouter, Depends
 from datetime import datetime
 from src.services.default_services import DEFAULT_HERO, DEFAULT_PROCESS, add_default_missions, get_default_case_studies, normalize_process_list
+from src.config import DEFAULT_CASE_STUDY_ID
 from src.services.llm_services import get_history
 
 from ..models.goal import (
@@ -251,7 +252,8 @@ async def clarify_goal(
             response_data = extract_json_from_fenced_block(clarification_response)
 
             # Populate case studies from CMS
-            case_ids = response_data.get("caseStudies", []) or ["case-1"]
+            # If LLM didn't suggest case studies, fallback to env-provided default
+            case_ids = response_data.get("caseStudies", []) or [DEFAULT_CASE_STUDY_ID]
             if isinstance(case_ids, list) and all(isinstance(cid, str) for cid in case_ids):
                 case_studies = await cms.get_case_studies_by_ids(case_ids)
                 response_data["caseStudies"] = case_studies
