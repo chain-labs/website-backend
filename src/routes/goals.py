@@ -1,7 +1,8 @@
 """Goal and personalization routes."""
 
 import json
-import traceback
+import logging
+import time
 from fastapi import APIRouter, Depends
 from datetime import datetime
 from src.services.default_services import DEFAULT_HERO, DEFAULT_PROCESS, add_default_missions, get_default_case_studies, normalize_process_list
@@ -18,10 +19,14 @@ from ..models.goal import (
 )
 from ..auth.middleware import get_current_session
 from ..services.session_manager import session_manager
-from ..utils.errors import raise_http_error
+from ..utils.errors import raise_http_error, raise_structured_error
+from ..utils.llm_validation import LLMValidationError, validate_goal_payload, validate_clarify_payload, validate_session_state_for_clarify
 from ..services.goal_parser import parse_user_clarification, parse_user_goal
 from ..services import cms
 from ..utils.json_utils import extract_json_from_fenced_block
+from ..services.history_manager import append_history_messages, rollback_last_messages
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api", tags=["Goals & Personalization"])
 
@@ -122,23 +127,111 @@ async def submit_goal(
     - The generated missions are tailored to your specific input
     """
 
+    start_time = time.perf_counter()
+    logger.info(
+        "Processing goal submission",
+        extra={"session_id": session_id, "event": "goal.submit.start"}
+    )
+
     # Validate input
     if not request.input or not request.input.strip():
-        raise_http_error(400, "Input cannot be empty")
+        raise_structured_error(400, "Input cannot be empty", "GOAL_EMPTY_INPUT", "restart_or_retry")
 
     user_message = {"role": "user", "message": request.input, "datetime": datetime.now().isoformat()}
-    
+
     try:
         # Run async LLM parse
-        goal_response = await parse_user_goal(request.input, session_id)
-        
-        # Merge session_id into final response
-        structured_goal = GoalResponse(assistantMessage={"message": goal_response, "datetime": datetime.now().isoformat()}, history=[user_message, {"role": "assistant", "message": goal_response, "datetime": datetime.now().isoformat()}])
+        goal_result = await parse_user_goal(request.input, session_id)
+
+        # Validate LLM response
+        try:
+            validate_goal_payload(goal_result.content)
+        except LLMValidationError as validation_error:
+            logger.warning(
+                "Goal payload validation failed",
+                extra={
+                    "session_id": session_id,
+                    "event": "goal.submit.validation_failed",
+                    "error_code": validation_error.error_code,
+                }
+            )
+            raise_structured_error(
+                422,
+                validation_error.args[0],
+                validation_error.error_code,
+                validation_error.retry_action
+            )
+
+        timestamp = datetime.now().isoformat()
+        structured_goal = GoalResponse(
+            assistantMessage={"message": goal_result.content, "datetime": timestamp},
+            history=[
+                user_message,
+                {"role": "assistant", "message": goal_result.content, "datetime": timestamp},
+            ],
+        )
+
+        history_messages = list(goal_result.messages_to_persist)
+
+        try:
+            await append_history_messages(session_id, history_messages)
+        except Exception as storage_error:
+            logger.exception(
+                "Goal history persistence failed",
+                extra={
+                    "session_id": session_id,
+                    "event": "goal.submit.history_failure",
+                    "messages_to_persist": len(history_messages),
+                }
+            )
+            await rollback_last_messages(session_id, len(history_messages))
+            raise_structured_error(500, "Failed to persist goal history", "DATABASE_FAILURE", "restart_or_retry")
+
+        duration_ms = (time.perf_counter() - start_time) * 1000
+        logger.info(
+            "Goal submission succeeded",
+            extra={
+                "session_id": session_id,
+                "event": "goal.submit.success",
+                "duration_ms": round(duration_ms, 2),
+            }
+        )
+
         return structured_goal
 
-    except Exception:
-        print("LLM Exception:", traceback.format_exc())
-        raise_http_error(500, "LLM parse error")
+    except LLMValidationError:
+        # Re-raise validation errors as-is
+        raise
+    except Exception as e:
+        logger.exception(
+            "Unhandled exception while processing goal submission",
+            extra={
+                "session_id": session_id,
+                "event": "goal.submit.unhandled_exception",
+            }
+        )
+        if hasattr(e, "status_code"):
+            raise e
+        # Check if it's a timeout or rate limit error
+        error_str = str(e).lower()
+        if any(keyword in error_str for keyword in ["timeout", "rate limit", "429", "503"]):
+            logger.warning(
+                "AI service overloaded during goal submission",
+                extra={
+                    "session_id": session_id,
+                    "event": "goal.submit.overloaded",
+                }
+            )
+            raise_structured_error(502, "AI service temporarily overloaded", "GOAL_SERVICE_OVERLOADED", "restart_or_retry")
+        else:
+            logger.error(
+                "Goal processing failed",
+                extra={
+                    "session_id": session_id,
+                    "event": "goal.submit.failure",
+                }
+            )
+            raise_structured_error(500, "Failed to process goal", "GOAL_PROCESSING_FAILED", "restart_or_retry")
 
 
 @router.post("/clarify", response_model=ClarifyResponse)
@@ -240,15 +333,79 @@ async def clarify_goal(
     3. Use `/api/clarify` to refine if needed
     4. Proceed with mission completion via `/api/mission/complete`
     """
-    if not request.clarification or not request.clarification.strip():
-        raise_http_error(400, "Clarification cannot be empty")
-    
-    try:
-        clarification_response = await parse_user_clarification(request.clarification, session_id)
+    start_time = time.perf_counter()
+    logger.info(
+        "Processing goal clarification",
+        extra={"session_id": session_id, "event": "goal.clarify.start"}
+    )
 
-        # Parse the JSON response using utility
+    if not request.clarification or not request.clarification.strip():
+        raise_structured_error(400, "Clarification cannot be empty", "CLARIFY_EMPTY_INPUT", "retry_or_restart")
+
+    # Validate session state before making LLM call
+    try:
+        from src.services.llm_services import get_history
+        history = await get_history(session_id)
+        messages = await history.aget_messages()
+        validate_session_state_for_clarify(messages)
+    except LLMValidationError as validation_error:
+        logger.warning(
+            "Clarify session validation failed",
+            extra={
+                "session_id": session_id,
+                "event": "goal.clarify.session_invalid",
+                "error_code": validation_error.error_code,
+            }
+        )
+        raise_structured_error(
+            422,
+            validation_error.args[0],
+            validation_error.error_code,
+            validation_error.retry_action
+        )
+
+    try:
+        clarification_result = await parse_user_clarification(request.clarification, session_id)
+        clarification_response = clarification_result.content
+
+        # Parse and validate the JSON response before persisting anything
         try:
             response_data = extract_json_from_fenced_block(clarification_response)
+            # Validate the parsed payload structure
+            validate_clarify_payload(response_data)
+        except (ValueError, json.JSONDecodeError) as json_error:
+            logger.warning(
+                "Clarification JSON parsing failed",
+                extra={
+                    "session_id": session_id,
+                    "event": "goal.clarify.invalid_json",
+                    "error": str(json_error),
+                }
+            )
+            raise_structured_error(
+                422,
+                "Invalid response format from AI service",
+                "CLARIFY_INVALID_JSON",
+                "retry_or_restart"
+            )
+        except LLMValidationError as validation_error:
+            logger.warning(
+                "Clarification payload validation failed",
+                extra={
+                    "session_id": session_id,
+                    "event": "goal.clarify.validation_failed",
+                    "error_code": validation_error.error_code,
+                }
+            )
+            raise_structured_error(
+                422,
+                validation_error.args[0],
+                validation_error.error_code,
+                validation_error.retry_action
+            )
+
+        # Only proceed with data processing if validation passed
+        try:
 
             # Populate case studies from CMS
             case_ids = response_data.get("caseStudies", []) or ["case-1"]
@@ -337,20 +494,98 @@ async def clarify_goal(
                         "call_unlocked": False,
                     }
                 )
-                print("Session progress stored successfully in clarify route")
+                logger.info(
+                    "Clarification session progress stored",
+                    extra={
+                        "session_id": session_id,
+                        "event": "goal.clarify.progress_stored",
+                        "missions_count": len(missions_full),
+                    }
+                )
             except Exception as e:
-                print(f"Warning: Failed to store session progress: {e}")
+                logger.warning(
+                    "Failed to store clarification session progress",
+                    extra={
+                        "session_id": session_id,
+                        "event": "goal.clarify.progress_store_failed",
+                        "error": str(e),
+                    }
+                )
 
-            return ClarifyResponse(**response_data)
+            clarify_payload = ClarifyResponse(**response_data)
 
-        except json.JSONDecodeError as e:
-            print("JSON decoding failed:", e)
-            raise_http_error(500, "Invalid response format from AI service")
-        except ValueError:
-            raise_http_error(500, "Invalid response format from AI service")
+            history_messages = list(clarification_result.messages_to_persist)
+
+            # Persist history only after successful validation and session storage
+            try:
+                await append_history_messages(session_id, history_messages)
+            except Exception as storage_error:
+                logger.exception(
+                    "Clarification history persistence failed",
+                    extra={
+                        "session_id": session_id,
+                        "event": "goal.clarify.history_failure",
+                        "messages_to_persist": len(history_messages),
+                    }
+                )
+                await rollback_last_messages(session_id, len(history_messages))
+                raise_structured_error(500, "Failed to persist clarification history", "DATABASE_FAILURE", "retry_or_restart")
+
+            duration_ms = (time.perf_counter() - start_time) * 1000
+            logger.info(
+                "Clarification succeeded",
+                extra={
+                    "session_id": session_id,
+                    "event": "goal.clarify.success",
+                    "duration_ms": round(duration_ms, 2),
+                }
+            )
+
+            return clarify_payload
+
+        except Exception as processing_error:
+            logger.exception(
+                "Clarification data processing error",
+                extra={
+                    "session_id": session_id,
+                    "event": "goal.clarify.processing_error",
+                }
+            )
+            raise_structured_error(500, "Failed to process clarification data", "CLARIFY_PROCESSING_FAILED", "retry_or_restart")
+
+    except LLMValidationError:
+        # Re-raise validation errors as-is (already structured)
+        raise
     except Exception as e:
-        print("LLM Exception:", traceback.format_exc())
-        raise_http_error(500, f"LLM parse error: {str(e)}")
+        logger.exception(
+            "Unhandled exception during clarification",
+            extra={
+                "session_id": session_id,
+                "event": "goal.clarify.unhandled_exception",
+            }
+        )
+        if hasattr(e, "status_code"):
+            raise e
+        # Check if it's a timeout or rate limit error
+        error_str = str(e).lower()
+        if any(keyword in error_str for keyword in ["timeout", "rate limit", "429", "503"]):
+            logger.warning(
+                "AI service overloaded during clarification",
+                extra={
+                    "session_id": session_id,
+                    "event": "goal.clarify.overloaded",
+                }
+            )
+            raise_structured_error(502, "AI service temporarily overloaded", "CLARIFY_SERVICE_OVERLOADED", "retry_or_restart")
+        else:
+            logger.error(
+                "Clarification generation failed",
+                extra={
+                    "session_id": session_id,
+                    "event": "goal.clarify.failure",
+                }
+            )
+            raise_structured_error(500, "Failed to generate clarification", "CLARIFY_GENERATION_FAILED", "retry_or_restart")
 
 @router.get("/personalised", response_model=PersonalisedResponse)
 async def get_personalized_content(session_id: str = Depends(get_current_session)):
@@ -441,6 +676,11 @@ async def get_personalized_content(session_id: str = Depends(get_current_session
     """
 
 
+    start_time = time.perf_counter()
+    logger.info(
+        "Fetching personalized content",
+        extra={"session_id": session_id, "event": "goal.personalised.start"}
+    )
 
     try:
         sid = (session_id[:4] + "-" + session_id[-4:]) if session_id and len(session_id) >= 8 else session_id
@@ -490,7 +730,16 @@ async def get_personalized_content(session_id: str = Depends(get_current_session
                 call_record=progress.get("call_record", [])[-1:] or []
             )
 
-            print("Sending Response from db storage")
+            duration_ms = (time.perf_counter() - start_time) * 1000
+            logger.info(
+                "Served personalized content from stored progress",
+                extra={
+                    "session_id": session_id,
+                    "event": "goal.personalised.cache_hit",
+                    "missions_count": len(missions_full),
+                    "duration_ms": round(duration_ms, 2),
+                }
+            )
 
             return PersonalisedResponse(
                 sid=sid,
@@ -543,7 +792,14 @@ async def get_personalized_content(session_id: str = Depends(get_current_session
                     # Create PersonalisedData object
                     personalised_data = PersonalisedData(**response_data)
                 except (ValueError, json.JSONDecodeError) as e:
-                    print(f"JSON extraction/decoding failed: {e}")
+                    logger.warning(
+                        "Clarification history JSON decoding failed",
+                        extra={
+                            "session_id": session_id,
+                            "event": "goal.personalised.history_decode_failed",
+                            "error": str(e),
+                        }
+                    )
                     process = DEFAULT_PROCESS
                     # Fallback to generic data if JSON parsing fails
                     personalised_data = PersonalisedData(
@@ -615,6 +871,17 @@ async def get_personalized_content(session_id: str = Depends(get_current_session
         if personalised_data is None:
             raise_http_error(500, "Failed to generate personalization data")
 
+        duration_ms = (time.perf_counter() - start_time) * 1000
+        logger.info(
+            "Personalized content generated",
+            extra={
+                "session_id": session_id,
+                "event": "goal.personalised.success",
+                "status": status,
+                "duration_ms": round(duration_ms, 2),
+            }
+        )
+
         return PersonalisedResponse(
             sid=sid,
             status=status,
@@ -623,5 +890,11 @@ async def get_personalized_content(session_id: str = Depends(get_current_session
         )
 
     except Exception:
-        print(f"Error in get_personalized_content: {traceback.format_exc()}")
+        logger.exception(
+            "Failed to build personalized content",
+            extra={
+                "session_id": session_id,
+                "event": "goal.personalised.failure",
+            }
+        )
         raise_http_error(500, "Personalization engine error")
