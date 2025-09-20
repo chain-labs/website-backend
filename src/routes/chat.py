@@ -1,7 +1,8 @@
 """Chat endpoint routes."""
 
 import json
-import traceback
+import logging
+import time
 from fastapi import APIRouter, Depends
 from typing import Dict, Any
 
@@ -11,7 +12,11 @@ from ..models.chat import ChatRequest, ChatResponse
 from ..auth.middleware import get_current_session
 from ..services.session_manager import session_manager
 from ..services.chat_service import chat_service
-from ..utils.errors import raise_http_error
+from ..services.history_manager import append_history_messages, rollback_last_messages
+from ..utils.errors import raise_http_error, raise_structured_error
+from ..utils.llm_validation import LLMValidationError, validate_chat_payload
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api", tags=["Chat"])
 
@@ -173,31 +178,96 @@ async def chat_with_assistant(
     - Navigation instructions help frontend show the most relevant page/section
     - All timestamps are in UTC ISO format
     """
+    start_time = time.perf_counter()
+    logger.info(
+        "Processing chat request",
+        extra={
+            "session_id": session_id,
+            "event": "chat.ask.start",
+            "page": chat_request.context.page,
+            "section": chat_request.context.section,
+        }
+    )
+
     try:
-        # # Get session data
-        # session_data = await session_manager.get_session(session_id)
-        # if not session_data:
-        #     raise_http_error(404, "Session not found")
-        
-        # # Validate request
-        # if not chat_request.message.strip():
-        #     raise_http_error(400, "Message cannot be empty")
-        
-        # Generate AI response using chat service
-
-        response = await chat_service.ask(
-          session_id=session_id, 
-          message=chat_request.message, 
-          page=chat_request.context.page, 
-          section=chat_request.context.section
+        service_result = await chat_service.ask(
+            session_id=session_id,
+            message=chat_request.message,
+            page=chat_request.context.page,
+            section=chat_request.context.section,
         )
-        return response
-    except Exception as e:
-        print("Error", traceback.format_exc())
-        if hasattr(e, 'status_code'):
-            # Re-raise HTTP errors
-            raise e
-        else:
-            # Log and return generic error for unexpected exceptions
-            raise_http_error(500, "AI assistant temporarily unavailable")
 
+        history_messages = list(service_result.messages_to_persist)
+
+        try:
+            await append_history_messages(session_id, history_messages)
+        except Exception as storage_error:
+            logger.exception(
+                "Chat history persistence failed",
+                extra={
+                    "session_id": session_id,
+                    "event": "chat.ask.history_failure",
+                    "messages_to_persist": len(history_messages),
+                }
+            )
+            await rollback_last_messages(session_id, len(history_messages))
+            raise_structured_error(500, "Failed to persist chat history", "DATABASE_FAILURE", "retry_or_new_message")
+
+        duration_ms = (time.perf_counter() - start_time) * 1000
+        logger.info(
+            "Chat response generated",
+            extra={
+                "session_id": session_id,
+                "event": "chat.ask.success",
+                "duration_ms": round(duration_ms, 2),
+            }
+        )
+
+        return service_result.response
+    except LLMValidationError as validation_error:
+        # Re-raise validation errors from chat service
+        logger.warning(
+            "Chat payload validation failed",
+            extra={
+                "session_id": session_id,
+                "event": "chat.ask.validation_failed",
+                "error_code": validation_error.error_code,
+            }
+        )
+        raise_structured_error(
+            422,
+            validation_error.args[0],
+            validation_error.error_code,
+            validation_error.retry_action
+        )
+    except Exception as e:
+        logger.exception(
+            "Unhandled exception during chat request",
+            extra={
+                "session_id": session_id,
+                "event": "chat.ask.unhandled_exception",
+            }
+        )
+        if hasattr(e, "status_code"):
+            raise e
+
+        # Check if it's a timeout or rate limit error
+        error_str = str(e).lower()
+        if any(keyword in error_str for keyword in ["timeout", "rate limit", "429", "503"]):
+            logger.warning(
+                "AI service overloaded during chat request",
+                extra={
+                    "session_id": session_id,
+                    "event": "chat.ask.overloaded",
+                }
+            )
+            raise_structured_error(502, "AI assistant temporarily overloaded", "CHAT_SERVICE_OVERLOADED", "retry_or_new_message")
+        else:
+            logger.error(
+                "Chat response generation failed",
+                extra={
+                    "session_id": session_id,
+                    "event": "chat.ask.failure",
+                }
+            )
+            raise_structured_error(500, "Failed to generate response", "CHAT_RESPONSE_FAILED", "retry_or_new_message")

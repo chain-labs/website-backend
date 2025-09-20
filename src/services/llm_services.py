@@ -10,7 +10,7 @@ from typing import List
 import psycopg
 
 from src.config import OPENAI_API_KEY
-from src.database import DATABASE_URL
+from src.database import get_database_url
 
 
 
@@ -21,7 +21,7 @@ llm = ChatOpenAI(model="gpt-5-nano", temperature=0.7, api_key=OPENAI_API_KEY)
 
 async def get_history(session_id: str) -> PostgresChatMessageHistory:
     # Convert SQLAlchemy URL to standard PostgreSQL connection string
-    db_url = DATABASE_URL.replace('postgresql+psycopg://', 'postgresql://')
+    db_url = get_database_url().replace('postgresql+psycopg://', 'postgresql://')
     sync_connection = psycopg.connect(db_url)
     async_connection = await psycopg.AsyncConnection.connect(db_url)
     table_name = "message_store"

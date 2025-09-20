@@ -2,7 +2,7 @@
 """Initialize the database with required tables."""
 import asyncio
 import psycopg
-from src.database import DATABASE_URL
+from src.database import get_database_url
 
 CREATE_SESSIONS_TABLE = """
 CREATE TABLE IF NOT EXISTS sessions (
@@ -52,7 +52,9 @@ CREATE TABLE IF NOT EXISTS session_transfers (
 
 async def create_tables():
     """Create all tables defined in models."""
-    async with await psycopg.AsyncConnection.connect(DATABASE_URL) as conn:
+    database_url = get_database_url()
+    print("Connecting to database...")
+    async with await psycopg.AsyncConnection.connect(database_url) as conn:
         async with conn.cursor() as cur:
             await cur.execute(CREATE_SESSIONS_TABLE)
             await cur.execute(CREATE_MESSAGE_STORE_TABLE)
