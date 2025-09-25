@@ -242,8 +242,15 @@ class ChatService:
         history_store = await get_history(session_id)
         stored_messages = await history_store.aget_messages()
         cleaned_history = self._build_history(stored_messages)
-        print(f"Stored Messages: {stored_messages}")
-        print(f"Cleaned History: {cleaned_history}")
+        logger.debug(
+            "Loaded stored chat history",
+            extra={
+                "session_id": session_id,
+                "event": "chat.history.deserialize",
+                "stored_count": len(stored_messages),
+                "returned_count": len(cleaned_history),
+            }
+        )
         return self._serialize_history(cleaned_history)
 
     @staticmethod

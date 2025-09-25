@@ -1,6 +1,6 @@
 """Authentication routes."""
 
-import traceback
+import logging
 
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi.responses import JSONResponse
@@ -17,6 +17,8 @@ from ..auth.middleware import get_current_session
 from ..services.session_manager import session_manager
 from ..utils.errors import raise_http_error, create_error_response
 from ..database import get_connection
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/auth", tags=["Authentication"])
 
@@ -71,27 +73,31 @@ async def create_session(request: Request):
     - Use access_token for authenticated requests
     - Use refresh_token to get new tokens when needed
     """
+    logger.info("Creating new session", extra={"event": "auth.session.create.start"})
     try:
         async with get_connection() as conn:
-            # Generate session ID and tokens
             session_id = await jwt_manager.generate_session_id(conn, request)
-            print(f"Session ID: {session_id}")
             access_token = await jwt_manager.create_access_token(session_id)
-            print(f"Access Token: {access_token}")
             refresh_token = await jwt_manager.create_refresh_token(session_id)
-            print(f"Refresh Token: {refresh_token}")
-            
-            # Create session in memory
+
             await session_manager.create_session(session_id)
-            
+
+            logger.info(
+                "Session created successfully",
+                extra={
+                    "event": "auth.session.create.success",
+                    "session_id": session_id,
+                }
+            )
+
             return SessionResponse(
                 access_token=access_token,
                 expires_in=jwt_manager.expiry_seconds,
                 refresh_token=refresh_token,
                 refresh_expires_in=jwt_manager.expiry_seconds
             )
-    except Exception as e:
-        print("JWT Exception:", traceback.format_exc())
+    except Exception:
+        logger.exception("Failed to create session", extra={"event": "auth.session.create.error"})
         raise_http_error(500, "JWT generation failed")
 
 
@@ -157,6 +163,7 @@ async def refresh_token(request: RefreshRequest):
     - Refresh tokens have the same expiry as access tokens (1 year)
     - Failed refresh attempts may indicate compromised tokens
     """
+    logger.info("Refreshing auth tokens", extra={"event": "auth.session.refresh.start"})
     try:
         async with get_connection() as conn:
             # Validate refresh token
@@ -180,6 +187,14 @@ async def refresh_token(request: RefreshRequest):
             # Optionally revoke old refresh token
             await session_manager.revoke_token(request.refresh_token)
 
+            logger.info(
+                "Refresh token rotated",
+                extra={
+                    "event": "auth.session.refresh.success",
+                    "session_id": session_id,
+                }
+            )
+
             return RefreshResponse(
                 access_token=new_access_token,
                 expires_in=jwt_manager.expiry_seconds,
@@ -188,7 +203,8 @@ async def refresh_token(request: RefreshRequest):
             )
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception:
+        logger.exception("Failed to refresh auth tokens", extra={"event": "auth.session.refresh.error"})
         raise_http_error(500, "JWT rotation failed")
 
 
@@ -268,6 +284,7 @@ async def revoke_session(
     - Consider this a "soft logout" - user can still use access token temporarily
     - For complete logout, client should also discard the access token
     """
+    logger.info("Revoking refresh token", extra={"event": "auth.session.revoke.start"})
     try:
         async with get_connection() as conn:
             # Add token to revoked list
@@ -286,8 +303,17 @@ async def revoke_session(
                 )
                 await conn.commit()
             
+            logger.info(
+                "Refresh token revoked",
+                extra={
+                    "event": "auth.session.revoke.success",
+                    "session_id": session_id,
+                }
+            )
+
             return RevokeResponse(revoked=True)
-    except Exception as e:
+    except Exception:
+        logger.exception("Failed to revoke refresh token", extra={"event": "auth.session.revoke.error"})
         raise_http_error(500, "Revocation failed")
 
 
@@ -306,6 +332,13 @@ async def reset_session(
     """
 
 
+    logger.info(
+        "Resetting session",
+        extra={
+            "event": "auth.session.reset.start",
+            "old_session_id": old_session_id,
+        }
+    )
     try:
         async with get_connection() as conn:
             # Generate new session id  and jwt tokens
@@ -323,14 +356,28 @@ async def reset_session(
                 new_session_id=new_session_id
             )
 
+            logger.info(
+                "Session reset complete",
+                extra={
+                    "event": "auth.session.reset.success",
+                    "old_session_id": old_session_id,
+                    "new_session_id": new_session_id,
+                }
+            )
+
             return SessionResponse(
                 access_token=new_access_token,
                 expires_in=jwt_manager.expiry_seconds,
                 refresh_token=new_refresh_token,
                 refresh_expires_in=jwt_manager.expiry_seconds
             )
-    except Exception as e:
-        print("JWT Exception: {e}", traceback.format_exc())
+    except Exception:
+        logger.exception(
+            "Failed to reset session",
+            extra={
+                "event": "auth.session.reset.error",
+                "old_session_id": old_session_id,
+            }
+        )
         raise_http_error(500, "JWT generation failed")
-
 

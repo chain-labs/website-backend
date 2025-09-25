@@ -1,6 +1,6 @@
 """Mission and progress routes."""
 
-import traceback
+import logging
 from fastapi import APIRouter, Depends
 
 from ..models.mission import (
@@ -15,6 +15,8 @@ from ..auth.middleware import get_current_session
 from ..services.session_manager import session_manager
 from ..services.mock_data import mock_data_service
 from ..utils.errors import raise_http_error
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api", tags=["Missions & Progress"])
 
@@ -156,7 +158,14 @@ async def complete_mission(
     - Consider showing celebration UI for point awards
     - Refresh `/api/progress` to get complete updated status
     """
-    print(f"Completing mission: {request.mission_id} for Session: {session_id}")
+    logger.info(
+        "Mission completion request received",
+        extra={
+            "session_id": session_id,
+            "event": "mission.complete.start",
+            "mission_id": request.mission_id,
+        }
+    )
     if not request.mission_id:
         raise_http_error(400, "Mission ID is required")
     
@@ -164,29 +173,82 @@ async def complete_mission(
         raise_http_error(400, "Artifact answer is required")
     
     # Get session data - try to load from DB if not in memory
-    print(f"DEBUG: Loading session data for session_id: {session_id}")
+    logger.debug(
+        "Loading session data for mission completion",
+        extra={
+            "session_id": session_id,
+            "event": "mission.complete.load_session",
+        }
+    )
     session_data = await session_manager.get_or_create_session_from_db(session_id)
-    print(f"DEBUG: Session data loaded: {session_data is not None}")
-    
+    logger.debug(
+        "Session data load result",
+        extra={
+            "session_id": session_id,
+            "event": "mission.complete.session_loaded",
+            "session_found": session_data is not None,
+        }
+    )
+
     if not session_data:
-        print(f"DEBUG: No session data found for session_id: {session_id}")
+        logger.warning(
+            "Mission completion failed - missing session data",
+            extra={
+                "session_id": session_id,
+                "event": "mission.complete.session_missing",
+            }
+        )
         raise_http_error(404, "Session not found. Please submit a goal first via /api/goal")
-    
+
     # Check if missions exist
-    print(f"DEBUG: Missions count: {len(session_data.missions) if session_data.missions else 0}")
+    logger.debug(
+        "Mission count in session",
+        extra={
+            "session_id": session_id,
+            "event": "mission.complete.mission_count",
+            "mission_count": len(session_data.missions) if session_data.missions else 0,
+        }
+    )
     if not session_data.missions:
-        print(f"DEBUG: No missions found in session data")
+        logger.warning(
+            "Mission completion failed - no missions available",
+            extra={
+                "session_id": session_id,
+                "event": "mission.complete.no_missions",
+            }
+        )
         raise_http_error(404, "No missions found. Please submit a goal first via /api/goal")
-    
+
     # Check if mission exists
-    print(f"DEBUG: Looking for mission_id: {request.mission_id}")
-    print(f"DEBUG: Available mission IDs: {[m.id for m in session_data.missions]}")
+    logger.debug(
+        "Searching for mission in session",
+        extra={
+            "session_id": session_id,
+            "event": "mission.complete.find_mission",
+            "mission_id": request.mission_id,
+            "available_missions": [m.id for m in session_data.missions],
+        }
+    )
     mission = next((m for m in session_data.missions if m.id == request.mission_id), None)
     if not mission:
-        print(f"DEBUG: Mission not found: {request.mission_id}")
+        logger.warning(
+            "Mission completion failed - mission not found",
+            extra={
+                "session_id": session_id,
+                "event": "mission.complete.mission_missing",
+                "mission_id": request.mission_id,
+            }
+        )
         raise_http_error(404, f"Mission '{request.mission_id}' not found. Available missions: {[m.id for m in session_data.missions]}")
-    
-    print(f"DEBUG: Mission found: {mission}")
+
+    logger.debug(
+        "Mission located for completion",
+        extra={
+            "session_id": session_id,
+            "event": "mission.complete.mission_found",
+            "mission_id": request.mission_id,
+        }
+    )
     
     # Check if already completed
     if request.mission_id in session_data.completed_missions:
@@ -195,7 +257,15 @@ async def complete_mission(
     try:
         # Complete the mission
         points_awarded = session_data.complete_mission(request.mission_id)
-        print(f"Points awarded: {points_awarded}")
+        logger.info(
+            "Mission scoring computed",
+            extra={
+                "session_id": session_id,
+                "event": "mission.complete.scored",
+                "mission_id": request.mission_id,
+                "points_awarded": points_awarded,
+            }
+        )
         if points_awarded is None:
             raise_http_error(500, "Failed to complete mission")
         
@@ -208,7 +278,14 @@ async def complete_mission(
             artifact_answer=request.artifact.answer,
         )
 
-        print(f"Completed mission: {request.mission_id}")
+        logger.info(
+            "Mission completion persisted",
+            extra={
+                "session_id": session_id,
+                "event": "mission.complete.success",
+                "mission_id": request.mission_id,
+            }
+        )
         
         # Get next mission from actual session data
         next_mission = None
@@ -225,14 +302,30 @@ async def complete_mission(
                     }
                     break
         
-        return CompleteMissionResponse(
+        response = CompleteMissionResponse(
             points_awarded=points_awarded,
             points_total=session_data.points_total,
             call_unlocked=session_data.is_call_unlocked(),
             next_mission=next_mission
         )
+        logger.debug(
+            "Mission completion response prepared",
+            extra={
+                "session_id": session_id,
+                "event": "mission.complete.response",
+                "next_mission": next_mission["id"] if next_mission else None,
+            }
+        )
+        return response
     except Exception as e:
-        print(f"Error in complete_mission: {e}", traceback.format_exc())
+        logger.exception(
+            "Mission completion failed",
+            extra={
+                "session_id": session_id,
+                "event": "mission.complete.error",
+                "mission_id": request.mission_id,
+            }
+        )
         raise_http_error(500, "Scoring update failure")
 
 
@@ -366,24 +459,55 @@ async def check_unlock_status(session_id: str = Depends(get_current_session)):
     """
     try:
         # First try to get progress from database
+        logger.info(
+            "Unlock status check requested",
+            extra={
+                "session_id": session_id,
+                "event": "unlock_status.check.start",
+            }
+        )
         progress = await session_manager.get_session_progress(session_id)
-        
+
         if progress:
-            return UnlockStatusResponse(
+            response = UnlockStatusResponse(
                 call_unlocked=progress.get("call_unlocked", False)
             )
+            logger.debug(
+                "Unlock status resolved from database",
+                extra={
+                    "session_id": session_id,
+                    "event": "unlock_status.check.db",
+                    "call_unlocked": response.call_unlocked,
+                }
+            )
+            return response
         
         # Fallback to in-memory session data
         session_data = await session_manager.get_session(session_id)
         if not session_data:
             raise_http_error(404, "Session not found")
-        
-        return UnlockStatusResponse(
+
+        response = UnlockStatusResponse(
             call_unlocked=session_data.is_call_unlocked()
         )
-        
+        logger.debug(
+            "Unlock status resolved from memory",
+            extra={
+                "session_id": session_id,
+                "event": "unlock_status.check.memory",
+                "call_unlocked": response.call_unlocked,
+            }
+        )
+        return response
+
     except Exception as e:
-        print(f"Error in check_unlock_status: {e}", traceback.format_exc())
+        logger.exception(
+            "Unlock status check failed",
+            extra={
+                "session_id": session_id,
+                "event": "unlock_status.check.error",
+            }
+        )
         raise_http_error(500, "Failed to check unlock status")
 
 
@@ -426,13 +550,37 @@ async def book_call(
         raise_http_error(400, "UId is required")
 
     try:
+        logger.info(
+            "Call booking record request received",
+            extra={
+                "session_id": session_id,
+                "event": "call.link.start",
+                "call_id": request.id,
+            }
+        )
         await session_manager.store_call_record(session_id, request.uid, request.id)
+
+        logger.info(
+            "Call booking record stored",
+            extra={
+                "session_id": session_id,
+                "event": "call.link.success",
+                "call_id": request.id,
+            }
+        )
 
         return LinkCallResponse(
             status=True,
             messages="Call Record Stored Succesfully"
         )
     except Exception as e:
-        print(f"ERROR: {e}", traceback.format_exc())
+        logger.exception(
+            "Call booking persistence failed",
+            extra={
+                "session_id": session_id,
+                "event": "call.link.error",
+                "call_id": request.id,
+            }
+        )
         raise_http_error(500, "Failed to save call data. Try Again!")
         

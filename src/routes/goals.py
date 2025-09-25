@@ -163,7 +163,14 @@ async def submit_goal(
             )
 
         timestamp = datetime.now().isoformat()
-        print(f"Expected Clarifications: {goal_result.raw_response.get('expectedClarifications')}")
+        logger.debug(
+            "Goal response expected clarifications extracted",
+            extra={
+                "session_id": session_id,
+                "event": "goal.submit.expected_clarifications",
+                "clarification_samples": goal_result.raw_response.get("expectedClarifications"),
+            }
+        )
         structured_goal = GoalResponse(
             assistantMessage={"message": goal_result.content, "datetime": timestamp, "expectedClarifications": goal_result.raw_response.get("expectedClarifications")},
             history=[

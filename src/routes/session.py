@@ -1,11 +1,14 @@
 """Session management routes."""
 
+import logging
 from fastapi import APIRouter, Depends
 
 from ..models.session import SessionResponse as SessionHydrationResponse
 from ..auth.middleware import get_current_session
 from ..services.session_manager import session_manager
 from ..utils.errors import raise_http_error
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api", tags=["Session Management"])
 
@@ -205,22 +208,59 @@ async def get_full_session(session_id: str = Depends(get_current_session)):
     - Update individual pieces with specific endpoint responses
     - Consider this the "bootstrap" data for your application
     """
+    logger.info(
+        "Hydrating session state",
+        extra={
+            "session_id": session_id,
+            "event": "session.hydrate.start",
+        }
+    )
+
     # Get session data
     session_data = await session_manager.get_session(session_id)
     if not session_data:
+        logger.warning(
+            "Session hydration failed - session missing",
+            extra={
+                "session_id": session_id,
+                "event": "session.hydrate.missing_session",
+            }
+        )
         raise_http_error(404, "Session not found")
     
     if not session_data.goal:
+        logger.warning(
+            "Session hydration failed - goal not set",
+            extra={
+                "session_id": session_id,
+                "event": "session.hydrate.missing_goal",
+            }
+        )
         raise_http_error(404, "No session content found. Please submit a goal first.")
     
     try:
         mission_statuses = session_data.get_mission_statuses()
-        
-        return SessionHydrationResponse(
+        response = SessionHydrationResponse(
             goal=session_data.goal,
             missions=mission_statuses,
             points_total=session_data.points_total,
             call_unlocked=session_data.is_call_unlocked()
         )
+        logger.info(
+            "Session hydration succeeded",
+            extra={
+                "session_id": session_id,
+                "event": "session.hydrate.success",
+                "mission_count": len(mission_statuses),
+            }
+        )
+        return response
     except Exception as e:
+        logger.exception(
+            "Session hydration error",
+            extra={
+                "session_id": session_id,
+                "event": "session.hydrate.error",
+            }
+        )
         raise_http_error(500, "Session retrieval error")

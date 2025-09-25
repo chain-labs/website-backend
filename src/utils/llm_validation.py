@@ -171,7 +171,13 @@ def validate_chat_payload(payload: Dict[str, Any]) -> None:
     Chat responses must have a 'reply' field at minimum.
     """
 
-    print(f"Chat Payload: {payload}")
+    logger.debug(
+        "Validating chat payload",
+        extra={
+            "event": "chat.validation.payload",
+            "payload_keys": list(payload.keys()) if isinstance(payload, dict) else None,
+        }
+    )
 
     if not payload.get('reply'):
         raise LLMValidationError(

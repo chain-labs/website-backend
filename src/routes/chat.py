@@ -287,6 +287,14 @@ async def get_chat_history(session_id: str = Depends(get_current_session)):
 
     try:
         history_messages = await chat_service.get_chat_history(session_id=session_id)
+        logger.info(
+            "Chat history fetched successfully",
+            extra={
+                "session_id": session_id,
+                "event": "chat.history.success",
+                "message_count": len(history_messages),
+            }
+        )
         return ChatHistoryResponse(history=history_messages)
     except Exception:
         logger.exception(
