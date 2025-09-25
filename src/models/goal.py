@@ -42,6 +42,7 @@ class GoalRequest(BaseModel):
 class AssistantMessage(BaseModel): 
     message: str
     datetime: datetime
+    expectedClarifications: List[str]
 
 class History(BaseModel):
     role: str

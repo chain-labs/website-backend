@@ -2,13 +2,14 @@
 
 import logging
 import time
+from datetime import datetime, timezone
 from dataclasses import dataclass
 from typing import List, Sequence
 
 from langchain.prompts import ChatPromptTemplate
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 
-from src.models.chat import ChatResponse
+from src.models.chat import ChatMessage, ChatResponse
 from src.prompt.chat_prompt import FOLLOWUP_PROMPT, USER_MESSAGE_CONTEXT, WELCOME_PROMPT
 from src.services.llm_services import get_history, llm
 from src.services.session_manager import session_manager
@@ -90,9 +91,6 @@ class ChatService:
                 "Adding follow-up system prompt",
                 extra={"event": "chat.service.ask", "stage": "followup_prompt"},
             )
-            follow_up_message = SystemMessage(content=FOLLOWUP_PROMPT)
-            conversation.append(follow_up_message)
-            new_messages.append(follow_up_message)
 
         context_template = ChatPromptTemplate.from_messages([("system", USER_MESSAGE_CONTEXT)])
         context_messages = context_template.format_messages(
@@ -237,6 +235,76 @@ class ChatService:
                 message_history.append(HumanMessage(content=stored.content))
 
         return message_history
+
+    async def get_chat_history(self, session_id: str) -> List[ChatMessage]:
+        """Fetch persisted chat history for a session from the message store."""
+
+        history_store = await get_history(session_id)
+        stored_messages = await history_store.aget_messages()
+        cleaned_history = self._build_history(stored_messages)
+        print(f"Stored Messages: {stored_messages}")
+        print(f"Cleaned History: {cleaned_history}")
+        return self._serialize_history(cleaned_history)
+
+    @staticmethod
+    def _serialize_history(messages: Sequence[BaseMessage]) -> List[ChatMessage]:
+        """Convert LangChain messages into plain chat messages with timestamps."""
+
+        serialized_history: List[ChatMessage] = []
+
+        for message in messages:
+            if message.type == "human":
+                role = "user"
+            elif message.type == "ai":
+                role = "assistant"
+            else:
+                continue
+
+            content = message.content if isinstance(message.content, str) else str(message.content)
+            timestamp = ChatService._extract_timestamp(message)
+
+            serialized_history.append(
+                ChatMessage(
+                    role=role,
+                    message=content,
+                    timestamp=timestamp,
+                )
+            )
+
+        return serialized_history
+
+    @staticmethod
+    def _extract_timestamp(message: BaseMessage) -> datetime:
+        """Derive a timestamp for a LangChain message, defaulting to now if absent."""
+
+        additional_kwargs = getattr(message, "additional_kwargs", {}) or {}
+        response_metadata = getattr(message, "response_metadata", {}) or {}
+
+        candidate = None
+        for source in (additional_kwargs, response_metadata):
+            if candidate:
+                break
+            for key in ("timestamp", "created_at", "createdAt"):
+                value = source.get(key)
+                if value:
+                    candidate = value
+                    break
+
+        if isinstance(candidate, datetime):
+            timestamp = candidate
+        elif isinstance(candidate, str):
+            normalized = candidate.rstrip("Z") + "+00:00" if candidate.endswith("Z") else candidate
+            try:
+                timestamp = datetime.fromisoformat(normalized)
+            except ValueError:
+                timestamp = datetime.now(timezone.utc)
+        else:
+            timestamp = datetime.now(timezone.utc)
+
+        if timestamp.tzinfo is None:
+            timestamp = timestamp.replace(tzinfo=timezone.utc)
+
+        return timestamp
 
 
 chat_service = ChatService()

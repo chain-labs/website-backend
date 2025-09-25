@@ -145,7 +145,7 @@ async def submit_goal(
 
         # Validate LLM response
         try:
-            validate_goal_payload(goal_result.content)
+            validate_goal_payload(goal_result.raw_response)
         except LLMValidationError as validation_error:
             logger.warning(
                 "Goal payload validation failed",
@@ -163,11 +163,12 @@ async def submit_goal(
             )
 
         timestamp = datetime.now().isoformat()
+        print(f"Expected Clarifications: {goal_result.raw_response.get('expectedClarifications')}")
         structured_goal = GoalResponse(
-            assistantMessage={"message": goal_result.content, "datetime": timestamp},
+            assistantMessage={"message": goal_result.content, "datetime": timestamp, "expectedClarifications": goal_result.raw_response.get("expectedClarifications")},
             history=[
                 user_message,
-                {"role": "assistant", "message": goal_result.content, "datetime": timestamp},
+                {"role": "assistant", "message": goal_result.content, "datetime": timestamp },
             ],
         )
 
@@ -366,20 +367,14 @@ async def clarify_goal(
 
     try:
         clarification_result = await parse_user_clarification(request.clarification, session_id)
-        clarification_response = clarification_result.content
 
-        # Parse and validate the JSON response before persisting anything
-        try:
-            response_data = extract_json_from_fenced_block(clarification_response)
-            # Validate the parsed payload structure
-            validate_clarify_payload(response_data)
-        except (ValueError, json.JSONDecodeError) as json_error:
+        response_payload = clarification_result.raw_response or clarification_result.content
+        if not isinstance(response_payload, dict):
             logger.warning(
-                "Clarification JSON parsing failed",
+                "Clarification payload missing dictionary structure",
                 extra={
                     "session_id": session_id,
-                    "event": "goal.clarify.invalid_json",
-                    "error": str(json_error),
+                    "event": "goal.clarify.invalid_payload_type",
                 }
             )
             raise_structured_error(
@@ -388,6 +383,9 @@ async def clarify_goal(
                 "CLARIFY_INVALID_JSON",
                 "retry_or_restart"
             )
+
+        try:
+            response_data = validate_clarify_payload(response_payload)
         except LLMValidationError as validation_error:
             logger.warning(
                 "Clarification payload validation failed",

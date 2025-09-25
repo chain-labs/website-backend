@@ -2,7 +2,7 @@ import json
 import logging
 import os
 from dataclasses import dataclass
-from typing import List
+from typing import Any, Dict, List, Optional
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -29,8 +29,9 @@ from ..utils.retry import (
 class ParsedLLMResult:
     """Structured result containing model output and history messages."""
 
-    content: str
+    content: Any
     messages_to_persist: List[BaseMessage]
+    raw_response: Optional[Dict[str, Any]] = None
 
 
 async def parse_user_goal(user_prompt: str, session_id: str) -> ParsedLLMResult:
@@ -107,17 +108,32 @@ async def parse_user_goal(user_prompt: str, session_id: str) -> ParsedLLMResult:
 
         # Parse the response
         try:
-            response_content = raw_response.content
+            response_content = json.loads(raw_response.content)
             session_logger.debug(
                 "Response content extracted",
-                extra={"event": "goal_parser.response.content", "content_preview": response_content[:200]}
+                extra={
+                    "event": "goal_parser.response.content",
+                    "content_preview": json.dumps(response_content)[:200],
+                }
             )
+
+            clarification_question = response_content.get("clarificationQuestion")
+            if isinstance(clarification_question, str):
+                clarification_question = clarification_question.strip()
+            else:
+                clarification_question = ""
+
             history_messages = [
                 SystemMessage(content=template_prompt),
                 HumanMessage(content=user_prompt),
-                AIMessage(content=response_content),
+                AIMessage(content=clarification_question),
             ]
-            return ParsedLLMResult(content=response_content, messages_to_persist=history_messages)
+
+            return ParsedLLMResult(
+                content=clarification_question,
+                messages_to_persist=history_messages,
+                raw_response=response_content,
+            )
         except json.JSONDecodeError as je:
             session_logger.error(
                 "Failed to parse JSON response",
@@ -182,12 +198,45 @@ async def parse_user_clarification(user_prompt: str, session_id: str) -> ParsedL
             )
             raise_http_error(503, "AI service temporarily unavailable. Please try again later.")
 
+        raw_content = response.content
+        if isinstance(raw_content, str):
+            raw_content_str = raw_content.strip()
+        else:
+            raw_content_str = json.dumps(raw_content)
+
+        try:
+            response_payload = json.loads(raw_content_str)
+            session_logger.debug(
+                "Clarify response extracted",
+                extra={
+                    "event": "goal_parser.clarify.response",
+                    "content_preview": json.dumps(response_payload)[:200],
+                }
+            )
+        except json.JSONDecodeError:
+            session_logger.error(
+                "Clarify response not valid JSON",
+                extra={"event": "goal_parser.clarify.invalid_json"},
+                exc_info=True,
+            )
+            raise_http_error(500, "Invalid clarification response format from AI service")
+
+        ai_message_content = raw_content_str
+        if isinstance(response_payload, dict):
+            personalized_pitch = response_payload.get("personalizedPitch")
+            if isinstance(personalized_pitch, (dict, list)):
+                ai_message_content = json.dumps(personalized_pitch)
+
         history_messages = [
             HumanMessage(content=user_prompt),
-            AIMessage(content=response.content),
+            AIMessage(content=ai_message_content),
         ]
 
-        return ParsedLLMResult(content=response.content, messages_to_persist=history_messages)
+        return ParsedLLMResult(
+            content=response_payload,
+            messages_to_persist=history_messages,
+            raw_response=response_payload,
+        )
 
     except Exception as e:
         session_logger.error(

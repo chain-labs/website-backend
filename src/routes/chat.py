@@ -8,7 +8,7 @@ from typing import Dict, Any
 
 from src.utils.json_utils import FENCED_JSON_PATTERN, extract_json_from_fenced_block
 
-from ..models.chat import ChatRequest, ChatResponse
+from ..models.chat import ChatHistoryResponse, ChatRequest, ChatResponse
 from ..auth.middleware import get_current_session
 from ..services.session_manager import session_manager
 from ..services.chat_service import chat_service
@@ -271,3 +271,29 @@ async def chat_with_assistant(
                 }
             )
             raise_structured_error(500, "Failed to generate response", "CHAT_RESPONSE_FAILED", "retry_or_new_message")
+
+
+@router.get("/chat/history", response_model=ChatHistoryResponse)
+async def get_chat_history(session_id: str = Depends(get_current_session)):
+    """Return the persisted chat history for the authenticated session."""
+
+    logger.info(
+        "Fetching chat history",
+        extra={
+            "session_id": session_id,
+            "event": "chat.history.fetch",
+        }
+    )
+
+    try:
+        history_messages = await chat_service.get_chat_history(session_id=session_id)
+        return ChatHistoryResponse(history=history_messages)
+    except Exception:
+        logger.exception(
+            "Failed to fetch chat history",
+            extra={
+                "session_id": session_id,
+                "event": "chat.history.failure",
+            }
+        )
+        raise_structured_error(500, "Failed to fetch chat history", "CHAT_HISTORY_FETCH_FAILED", "retry_or_new_message")

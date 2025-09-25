@@ -513,6 +513,41 @@ All errors return JSON:
 
 ---
 
+`GET /api/chat/history`
+
+* **Description**
+  Retrieve the persisted chat history for the active session. Use this to hydrate conversations after reloads.
+
+* **Request**
+
+  * Headers:
+
+    ```
+    Authorization: Bearer <accessToken>
+    ```
+
+* **Response 200**
+
+  ```json
+  {
+    "history": [
+      { "role": "user", "message": "Hi there", "timestamp": "2025-08-05T10:00:10Z" },
+      { "role": "assistant", "message": "Hello! How can I help today?", "timestamp": "2025-08-05T10:00:11Z" }
+    ]
+  }
+  ```
+
+  | Field     | Type            | Description                                                            |
+  | --------- | --------------- | ---------------------------------------------------------------------- |
+  | `history` | `array<object>` | Chronological chat history with `{ role, message, timestamp }` entries. |
+
+* **Errors**
+
+  * `401 Unauthorized` – Missing, invalid, or expired access token.
+  * `500 Internal Server Error` – Failed to load chat history.
+
+---
+
 ### Summary Table
 
 | Method | Path                    | Description                                         |
@@ -527,6 +562,7 @@ All errors return JSON:
 | POST   | `/api/mission/complete` | Complete mission + award points + next mission      |
 | GET    | `/api/unlock-status`    | Check if call gate unlocked                         |
 | GET    | `/api/session`          | Hydrate full session state                          |
+| GET    | `/api/chat/history`     | Fetch persisted chat history for the session        |
 | POST   | `/api/chat`             | Chat with AI assistant (contextual conversation)    |
 
 ---
