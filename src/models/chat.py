@@ -40,7 +40,7 @@ class ChatProgress(BaseModel):
 class ChatNavigation(BaseModel):
     """Navigation instruction for the frontend."""
     page: str = Field(..., description="Target page to navigate to")
-    sectionId: str = Field(..., description="Specific section on that page")
+    section: str = Field(..., description="Specific section on that page")
     metadata: Optional[Dict[str, Any]] = Field(None, description="Navigation parameters")
 
 
@@ -53,4 +53,13 @@ class ChatResponse(BaseModel):
     suggestedRead: Optional[List[str]] = Field(None, description="Recommended case studies")
     navigate: Optional[ChatNavigation] = Field(None, description="Frontend navigation instruction")
     
+
+class ChatHistoryResponse(BaseModel):
+    """Response model for chat history retrieval."""
+
+    history: List[ChatMessage] = Field(
+        default_factory=list,
+        description="Chronological chat history for the current session",
+    )
+
     

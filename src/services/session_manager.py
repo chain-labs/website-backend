@@ -7,7 +7,7 @@ This module provides two layers:
 """
 
 from typing import Any, Dict, List, Optional, Set, cast
-import traceback
+import logging
 from psycopg.types.json import Json
 from datetime import datetime, timezone
 
@@ -18,6 +18,9 @@ from ..models.mission import MissionStatus
 from ..models.chat import ChatMessage
 from ..models.db.db_models import SessionProgress
 from ..database import get_connection, transaction
+
+
+logger = logging.getLogger(__name__)
 
 
 class SessionData:
@@ -106,26 +109,50 @@ class SessionManager:
         Returns a dict shaped like `SessionProgress`, with columns stored explicitly
         in the `session_progress` table.
         """
-        print(f"DEBUG: get_session_progress called for session_id: {session_id}")
-        
+        logger.debug(
+            "Fetching session progress from database",
+            extra={
+                "session_id": session_id,
+                "event": "session_progress.fetch.start",
+            }
+        )
+
         query = """
             SELECT session_id, goal, hero, process, missions, case_studies, 
                 points_total, call_unlocked, call_record, why_this_case_studies_were_selected, why, created_at, updated_at
             FROM session_progress
             WHERE session_id = %s
         """
-        
-        print(f"DEBUG: Executing query: {query}")
-        print(f"DEBUG: Query parameters: {session_id}")
-        
+
+        logger.debug(
+            "Executing session progress query",
+            extra={
+                "session_id": session_id,
+                "event": "session_progress.fetch.query",
+            }
+        )
+
         async with get_connection() as conn:
             async with conn.cursor() as cur:
                 await cur.execute(query, (session_id,))
                 row = await cur.fetchone()
-                print(f"DEBUG: Database row result: {row is not None}")
-                
+                logger.debug(
+                    "Session progress query completed",
+                    extra={
+                        "session_id": session_id,
+                        "event": "session_progress.fetch.result",
+                        "row_found": row is not None,
+                    }
+                )
+
                 if not row:
-                    print(f"DEBUG: No database row found for session_id: {session_id}")
+                    logger.debug(
+                        "No session progress record found",
+                        extra={
+                            "session_id": session_id,
+                            "event": "session_progress.fetch.not_found",
+                        }
+                    )
                     return None
                 progress: Dict[str, Any] = {
                     "session_id": row.get("session_id", session_id),
@@ -150,29 +177,73 @@ class SessionManager:
         This method ensures we have a SessionData object with all the necessary methods
         for mission completion, regardless of whether the data came from DB or memory.
         """
-        print(f"DEBUG: get_or_create_session_from_db called for session_id: {session_id}")
-        
+        logger.debug(
+            "Loading session from memory or database",
+            extra={
+                "session_id": session_id,
+                "event": "session.load.start",
+            }
+        )
+
         # First check if we already have it in memory
         if session_id in self.sessions:
-            print(f"DEBUG: Session found in memory for session_id: {session_id}")
+            logger.debug(
+                "Session found in memory",
+                extra={
+                    "session_id": session_id,
+                    "event": "session.load.memory_hit",
+                }
+            )
             # Check if the in-memory session has missions, if not, reload from DB
             existing_session = self.sessions[session_id]
             if not existing_session.missions:
-                print(f"DEBUG: In-memory session has no missions, reloading from database")
+                logger.debug(
+                    "In-memory session missing missions, reloading",
+                    extra={
+                        "session_id": session_id,
+                        "event": "session.load.memory_reload",
+                    }
+                )
                 # Remove from memory to force reload from DB
                 del self.sessions[session_id]
             else:
-                print(f"DEBUG: In-memory session has {len(existing_session.missions)} missions, using existing")
+                logger.debug(
+                    "Using in-memory session",
+                    extra={
+                        "session_id": session_id,
+                        "event": "session.load.memory_use",
+                        "mission_count": len(existing_session.missions),
+                    }
+                )
                 return existing_session
-        
-        print(f"DEBUG: Session not in memory or needs reload, checking database for session_id: {session_id}")
+
+        logger.debug(
+            "Session not in memory - loading from database",
+            extra={
+                "session_id": session_id,
+                "event": "session.load.db_lookup",
+            }
+        )
         
         # Try to get from database
         progress = await self.get_session_progress(session_id)
-        print(f"DEBUG: Database progress lookup result: {progress is not None}")
-        
+        logger.debug(
+            "Database progress lookup completed",
+            extra={
+                "session_id": session_id,
+                "event": "session.load.db_result",
+                "progress_found": progress is not None,
+            }
+        )
+
         if not progress:
-            print(f"DEBUG: No progress found in database for session_id: {session_id}")
+            logger.debug(
+                "No session progress found in database",
+                extra={
+                    "session_id": session_id,
+                    "event": "session.load.db_not_found",
+                }
+            )
             return None
         
         # Create a new SessionData object from the database data
@@ -246,7 +317,14 @@ class SessionManager:
             payload.get("call_unlocked"),
         )
 
-        print(f"INFO: Payload: {payload} \n Values: {values} ")
+        logger.debug(
+            "Attempting to insert session progress if absent",
+            extra={
+                "session_id": session_id,
+                "event": "session_progress.insert_if_absent",
+                "has_missions": bool(payload.get("missions")),
+            }
+        )
         try:
             async with transaction() as conn:
                 async with conn.cursor() as cur:
@@ -254,11 +332,13 @@ class SessionManager:
                     # rowcount is 1 only if insert happened
                     return cur.rowcount == 1
         except Exception as exc:
-            print("ERROR: insert_session_progress_if_absent failed:")
-            print(f"  session_id={session_id}")
-            print(f"  values={values}")
-            print(f"  exception={exc}")
-            traceback.print_exc()
+            logger.exception(
+                "Failed to insert session progress",
+                extra={
+                    "session_id": session_id,
+                    "event": "session_progress.insert_if_absent.error",
+                }
+            )
             raise
 
     async def upsert_session_progress(self, session_id: str, progress: SessionProgress) -> None:
@@ -303,15 +383,28 @@ class SessionManager:
                 async with conn.cursor() as cur:
                     await cur.execute(query, values)
         except Exception as exc:
-            print("ERROR: upsert_session_progress failed:")
-            print(f"  session_id={values}")
-            print(f"  exception={exc}")
-            traceback.print_exc()
+            logger.exception(
+                "Failed to upsert session progress",
+                extra={
+                    "session_id": session_id,
+                    "event": "session_progress.upsert.error",
+                }
+            )
             raise
 
     async def update_mission_status(self, session_id: str, mission_id: str, status: str, points_total: int, artifact_answer: Optional[str] = None) -> None:
         """Update a specific mission's status and points total in the database."""
         try:
+            logger.debug(
+                "Updating mission status in persistence layer",
+                extra={
+                    "session_id": session_id,
+                    "event": "session_progress.mission.update",
+                    "mission_id": mission_id,
+                    "status": status,
+                    "points_total": points_total,
+                }
+            )
             # First, get the current progress
             current_progress = await self.get_session_progress(session_id)
             if not current_progress:
@@ -341,15 +434,23 @@ class SessionManager:
             
             # Save the updated progress
             await self.upsert_session_progress(session_id, updated_progress)
-            
+            logger.debug(
+                "Mission status persisted",
+                extra={
+                    "session_id": session_id,
+                    "event": "session_progress.mission.update.success",
+                    "mission_id": mission_id,
+                }
+            )
         except Exception as exc:
-            print("ERROR: update_mission_status failed:")
-            print(f"  session_id={session_id}")
-            print(f"  mission_id={mission_id}")
-            print(f"  status={status}")
-            print(f"  points_total={points_total}")
-            print(f"  exception={exc}")
-            traceback.print_exc()
+            logger.exception(
+                "Failed to update mission status",
+                extra={
+                    "session_id": session_id,
+                    "event": "session_progress.mission.update.error",
+                    "mission_id": mission_id,
+                }
+            )
             raise
 
     async def store_call_record(self, session_id: str, uid: str, id: str):
@@ -357,7 +458,14 @@ class SessionManager:
 
         try:
             current_progress = await self.get_session_progress(session_id)
-            print(f"Current: {current_progress}")
+            logger.debug(
+                "Storing call record for session",
+                extra={
+                    "session_id": session_id,
+                    "event": "session_progress.call_record.start",
+                    "call_id": id,
+                }
+            )
 
             if not current_progress:
                 raise ValueError(f"No progress found for session {session_id}")
@@ -373,12 +481,32 @@ class SessionManager:
             updated_progress["call_record"] = current_call_record
 
             await self.upsert_session_progress(session_id, updated_progress)
+            logger.debug(
+                "Call record stored",
+                extra={
+                    "session_id": session_id,
+                    "event": "session_progress.call_record.success",
+                    "calls_recorded": len(current_call_record),
+                }
+            )
 
         except ValueError as e:
-            print(f"Error: {e}", traceback.format_exc())
+            logger.warning(
+                "Session progress missing while storing call record",
+                extra={
+                    "session_id": session_id,
+                    "event": "session_progress.call_record.missing_progress",
+                }
+            )
             raise_http_error(400, "No progress found for current session")
         except Exception as e:
-            print(f"Error: {e}", traceback.format_exc())
+            logger.exception(
+                "Failed to store call record",
+                extra={
+                    "session_id": session_id,
+                    "event": "session_progress.call_record.error",
+                }
+            )
             raise_http_error(500, "Something went wrong while storing call_record")
 
 

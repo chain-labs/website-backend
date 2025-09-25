@@ -1,7 +1,9 @@
 """Tests for chat endpoint functionality."""
 
 import pytest
-from datetime import datetime
+from datetime import datetime, timezone
+
+from src.models.chat import ChatMessage
 
 
 class TestChatEndpoints:
@@ -311,6 +313,29 @@ class TestChatEndpoints:
             nav = data["navigate"]
             assert isinstance(nav["page"], str)
             assert isinstance(nav["section"], str)
+
+    async def test_get_chat_history_endpoint(self, async_client, authenticated_headers, monkeypatch):
+        """Test fetching chat history through the dedicated endpoint."""
+
+        history_messages = [
+            ChatMessage(role="user", message="Hello", timestamp=datetime.now(timezone.utc)),
+            ChatMessage(role="assistant", message="Hi!", timestamp=datetime.now(timezone.utc)),
+        ]
+
+        async def fake_get_chat_history(session_id):
+            return history_messages
+
+        monkeypatch.setattr("src.routes.chat.chat_service.get_chat_history", fake_get_chat_history)
+
+        response = await async_client.get("/api/chat/history", headers=authenticated_headers)
+        assert response.status_code == 200
+
+        data = response.json()
+        assert "history" in data
+        assert len(data["history"]) == 2
+        assert data["history"][0]["role"] == "user"
+        assert data["history"][1]["role"] == "assistant"
+        assert "timestamp" in data["history"][0]
 
 
 class TestChatIntegration:

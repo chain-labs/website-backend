@@ -1,5 +1,6 @@
 """LLM response validation utilities for CHA-110 error handling."""
 
+import json
 import logging
 from typing import Any, Dict, Optional, List
 from langchain_core.messages import BaseMessage
@@ -16,7 +17,7 @@ class LLMValidationError(Exception):
         self.retry_action = retry_action
 
 
-def validate_clarify_payload(payload: Dict[str, Any]) -> None:
+def validate_clarify_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     """
     Validate /clarify LLM response payload before persisting to session state.
 
@@ -29,9 +30,41 @@ def validate_clarify_payload(payload: Dict[str, Any]) -> None:
             "retry_or_restart"
         )
 
-    # Check for required sections
+    is_valid = payload.get("isValidClarification")
+    if is_valid is not True:
+        error_message = payload.get("errorMessage")
+        if not isinstance(error_message, str) or not error_message.strip():
+            error_message = "Clarification did not meet the required specificity."
+
+        raise LLMValidationError(
+            error_message,
+            "CLARIFY_INVALID",
+            "retry",
+        )
+
+    pitch_payload = payload.get("personalizedPitch")
+
+    if isinstance(pitch_payload, str):
+        try:
+            pitch_payload = json.loads(pitch_payload)
+        except json.JSONDecodeError as exc:
+            logger.error("Failed to decode personalized pitch JSON", exc_info=True)
+            raise LLMValidationError(
+                "Invalid personalized pitch format from AI service",
+                "CLARIFY_INVALID_PITCH",
+                "retry_or_restart"
+            ) from exc
+
+    if not isinstance(pitch_payload, dict):
+        raise LLMValidationError(
+            "Clarification response missing personalized pitch",
+            "CLARIFY_MISSING_PITCH",
+            "retry_or_restart"
+        )
+
+    # Check for required sections inside personalized pitch
     required_fields = ["hero", "process", "missions"]
-    missing_fields = [field for field in required_fields if not payload.get(field)]
+    missing_fields = [field for field in required_fields if not pitch_payload.get(field)]
 
     if missing_fields:
         logger.error(f"Clarify payload missing required fields: {missing_fields}")
@@ -42,7 +75,7 @@ def validate_clarify_payload(payload: Dict[str, Any]) -> None:
         )
 
     # Validate hero structure
-    hero = payload.get("hero", {})
+    hero = pitch_payload.get("hero", {})
     if not isinstance(hero, dict) or not hero.get("title") or not hero.get("description"):
         raise LLMValidationError(
             "Invalid hero section in AI response",
@@ -51,7 +84,7 @@ def validate_clarify_payload(payload: Dict[str, Any]) -> None:
         )
 
     # Validate process structure
-    process = payload.get("process", [])
+    process = pitch_payload.get("process", [])
     if not isinstance(process, list) or len(process) == 0:
         raise LLMValidationError(
             "Invalid or empty process section in AI response",
@@ -60,7 +93,7 @@ def validate_clarify_payload(payload: Dict[str, Any]) -> None:
         )
 
     # Validate missions structure
-    missions = payload.get("missions", [])
+    missions = pitch_payload.get("missions", [])
     if not isinstance(missions, list) or len(missions) == 0:
         raise LLMValidationError(
             "Invalid or empty missions section in AI response",
@@ -87,18 +120,47 @@ def validate_clarify_payload(payload: Dict[str, Any]) -> None:
                 "retry_or_restart"
             )
 
+    return pitch_payload
 
-def validate_goal_payload(payload: Optional[str]) -> None:
+
+def validate_goal_payload(payload: Optional[Dict[str, Any]]) -> None:
     """
     Validate /goal LLM response payload.
 
     For goal endpoint, we mainly validate that we got a response.
     """
-    if not payload or not payload.strip():
+    if not payload:
         raise LLMValidationError(
             "Empty response from AI service",
             "GOAL_EMPTY_RESPONSE",
             "restart_or_retry"
+        )
+
+    if not isinstance(payload, dict):
+        raise LLMValidationError(
+            "Invalid response format from AI service",
+            "GOAL_INVALID_RESPONSE",
+            "restart_or_retry",
+        )
+
+    is_valid_goal = payload.get("isValidGoal")
+    if is_valid_goal is not True:
+        error_message = payload.get("errorMessage")
+        if not isinstance(error_message, str) or not error_message.strip():
+            error_message = "Goal did not meet minimum specificity requirements."
+
+        raise LLMValidationError(
+            error_message,
+            "GOAL_INVALID",
+            "retry",
+        )
+
+    clarification_question = payload.get("clarificationQuestion")
+    if not isinstance(clarification_question, str) or not clarification_question.strip():
+        raise LLMValidationError(
+            "AI response missing clarification question",
+            "GOAL_MISSING_CLARIFICATION",
+            "restart_or_retry",
         )
 
 
@@ -108,20 +170,22 @@ def validate_chat_payload(payload: Dict[str, Any]) -> None:
 
     Chat responses must have a 'reply' field at minimum.
     """
-    if not isinstance(payload, dict):
-        raise LLMValidationError(
-            "Invalid response format from AI service",
-            "CHAT_INVALID_PAYLOAD",
-            "retry_or_new_message"
-        )
 
-    if not payload.get("reply"):
+    logger.debug(
+        "Validating chat payload",
+        extra={
+            "event": "chat.validation.payload",
+            "payload_keys": list(payload.keys()) if isinstance(payload, dict) else None,
+        }
+    )
+
+    if not payload.get('reply'):
         raise LLMValidationError(
             "AI response missing reply content",
             "CHAT_MISSING_REPLY",
             "retry_or_new_message"
         )
-
+    
 
 def validate_session_state_for_clarify(messages: List[BaseMessage]) -> None:
     """

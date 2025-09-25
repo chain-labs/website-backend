@@ -45,6 +45,11 @@ async def test_full_goal_clarify_chat_flow(async_client, monkeypatch):
                 HumanMessage(content=user_prompt),
                 AIMessage(content="{\"reply\": \"Thanks for sharing your goal!\"}"),
             ],
+            raw_response={
+                "isValidGoal": True,
+                "clarificationQuestion": "Thanks for sharing your goal!",
+                "errorMessage": None,
+            },
         )
 
     monkeypatch.setattr("src.routes.goals.parse_user_goal", fake_parse_goal)
@@ -82,13 +87,20 @@ async def test_full_goal_clarify_chat_flow(async_client, monkeypatch):
         "fallbackToGenericData": False,
     }
 
+    clarify_wrapper = {
+        "isValidClarification": True,
+        "personalizedPitch": clarify_payload,
+        "errorMessage": None,
+    }
+
     async def fake_parse_clarification(user_prompt, session_id):
         return ParsedLLMResult(
-            content=f"```json\n{json.dumps(clarify_payload)}\n```",
+            content=clarify_wrapper,
             messages_to_persist=[
                 HumanMessage(content=user_prompt),
-                AIMessage(content=f"```json\n{json.dumps(clarify_payload)}\n```"),
+                AIMessage(content=json.dumps(clarify_payload)),
             ],
+            raw_response=clarify_wrapper,
         )
 
     monkeypatch.setattr("src.routes.goals.parse_user_clarification", fake_parse_clarification)

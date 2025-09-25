@@ -1,9 +1,13 @@
 """Tests for service layer components."""
 
 import pytest
+from datetime import datetime, timezone
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+
 from src.services.session_manager import SessionManager, SessionData
 from src.services.mock_data import MockDataService
 from src.auth.jwt_utils import JWTManager
+from src.services.chat_service import chat_service
 
 
 class TestSessionManager:
@@ -190,10 +194,53 @@ class TestMockDataService:
     def test_generate_goal_general(self):
         """Test goal generation for general input."""
         service = MockDataService()
-        
+
         goal = service.generate_goal_from_input("I want to build a website")
-        
+
         assert goal.category == "general"
+
+
+class TestChatService:
+    """Tests for chat service helpers."""
+
+    @pytest.mark.asyncio
+    async def test_get_chat_history_formats_messages(self, monkeypatch):
+        """Chat history should be converted into serializable chat messages."""
+
+        timestamps = [
+            datetime(2024, 1, 1, 1, 0, 0, tzinfo=timezone.utc),
+            datetime(2024, 1, 1, 1, 0, 5, tzinfo=timezone.utc),
+        ]
+
+        stored_messages = [SystemMessage(content=f"system-{i}") for i in range(6)]
+        stored_messages.append(
+            HumanMessage(content="Hello", additional_kwargs={"timestamp": timestamps[0].isoformat()})
+        )
+        stored_messages.append(
+            AIMessage(
+                content="""```json\n{"reply": "Hi there"}\n```""",
+                additional_kwargs={"timestamp": timestamps[1].isoformat()},
+            )
+        )
+
+        class FakeHistory:
+            async def aget_messages(self):
+                return stored_messages
+
+        async def fake_get_history(session_id):
+            return FakeHistory()
+
+        monkeypatch.setattr("src.services.chat_service.get_history", fake_get_history)
+
+        history = await chat_service.get_chat_history("session-123")
+
+        assert len(history) == 2
+        assert history[0].role == "user"
+        assert history[0].message == "Hello"
+        assert history[0].timestamp == timestamps[0]
+        assert history[1].role == "assistant"
+        assert history[1].message == "Hi there"
+        assert history[1].timestamp == timestamps[1]
 
     @pytest.mark.unit
     def test_get_random_missions(self):
